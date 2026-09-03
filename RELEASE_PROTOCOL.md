@@ -373,12 +373,14 @@ The version bump is a grep, not a memory:
 
 ```bash
 grep -rnE '"version"|badge/version-|^VERSION =|selftest-[0-9]|[0-9]+/[0-9]+ checks' \
-  .claude-plugin scripts/sb.py README.md INSTALL-*.md 2>/dev/null
+  .claude-plugin .codex-plugin .zcode-plugin package.json scripts/sb.py README.md INSTALL-*.md docs/12-platforms.md 2>/dev/null
 ```
 
 | File | What to change |
 |---|---|
 | `.claude-plugin/plugin.json` | `"version"` (this is the one installs read) |
+| `.codex-plugin/plugin.json`, `.zcode-plugin/plugin.json` | `"version"`, lockstep (Codex and ZCode installs read these; the Codex CLI reported `1.0.0` from it live) |
+| `package.json` | `"version"` — what npm and pi install; stale here = npm ships old code under a new tag |
 | `scripts/sb.py` | `VERSION`; the selftest pins it to the manifest, so a missed bump goes red **only if the manifest exists** (§4) |
 | `README.md` | version badge (`badge/version-X.Y.Z`); selftest badge (`badge/selftest-N%2FN`) if the count changed |
 | `INSTALL-*.md` | any selftest count they quote |
@@ -422,16 +424,17 @@ platform, per release. "Verified live" means a real session on that platform ran
 fixture *from the release tree* and the guard denied a frozen edit there. Anything less is "Not
 verified", in those words, here and in `INSTALL-<PLATFORM>.md`.
 
-| Platform | Engine | Skills | Guard hook | Stop-driver | Status |
+| Platform | Engine | Skills | Guard hook | Stop-driver | Status (2026-09-03) |
 |---|---|---|---|---|---|
-| Claude Code | | | | | Verified live / Not verified |
-| Codex | | | | | Not verified |
-| OpenCode | | | | | Not verified |
-| Hermes | | | | | Not verified |
-| Pi | | | | | Not verified |
-| Antigravity | | | | | Not verified |
-| DeepSeek Harness | | | | | Not verified |
-| ZCode | | | | | Not verified |
+| Claude Code | `CLAUDE_PLUGIN_ROOT`; selftest 61/61 | native, `/strictlybetter:run` | PreToolUse exit 2 (exercised from the shell against a pyfix campaign) | Stop hook (block JSON exercised from the shell) | Not verified: no release-tree cycle in a live session on record |
+| Codex | `CLAUDE_PLUGIN_ROOT` (Codex exports the legacy name); selftest 61/61 from the plugin cache | manifest-mapped, `$run`; marketplace add + plugin add ran live on codex-cli 0.149.0-alpha.4.3 in a scratch `CODEX_HOME` | shared hooks.json; binary carries PreToolUse; not fired live | shared hooks.json; binary carries Stop + `stop_hook_active`; not fired live | Not verified: no live session (no credentials in the scratch home) |
+| OpenCode | `SB_ROOT` via `shell.env`, engine never extracted | extracted + `/sb-*`; 8 skills / 7 agents / 8 commands listed live on 1.18.23 (plugin route and `skills.paths` route) | V1 `tool.execute.before` throw, denied a frozen edit through the adapter against a campaign; V2 feature-detected | guard: hook-level (V1); **stop-driver: none — `sb drive --command`** | Not verified: OpenCode 2.0 (not installed), a model session, npm publish |
+| Hermes | `SB_ROOT` in `~/.hermes/.env` | `external_dirs`; 8 discovered live on v0.18.2 (scratch `HERMES_HOME`); `/skill status`, `/skill stop` for the collisions | guard: gate-time only | stop-driver: none — `sb drive --command` | Not verified: a session; nudge wire shape verified live via `hermes hooks test` (context once, `{}` after) |
+| Pi | `SB_ROOT` exported by the extension | `pi` manifest key + `/sb-*` templates; harness only | extension `tool_call` block, harness-verified against a campaign | stop-driver: none — `sb drive --command` | Not verified: pi not installed |
+| Antigravity | `SB_ROOT` exported by the user | convention | guard: gate-time only | stop-driver: none — `sb drive --command` | Not verified: agy not installed; manifest is the three schema keys |
+| DeepSeek Harness | `SB_ROOT` exported by the user | symlinks into `~/.agents/skills` | bridge PreToolUse registered; unverified | bridge Stop registered; unverified | Not verified: dsh not installed; hook files pass the shell matrix |
+| OpenClaw | `SB_ROOT` in the Gateway env | Codex bundle on ≥ 2026.7; the installed 2026.3.2 predates the bundle loader | guard: gate-time only | stop-driver: none — `sb drive --command` | Not verified: hook pack installed and listed `✓ ready` on 2026.3.2 (isolated state); no Gateway firing, no plugin route |
+| ZCode | `ZCODE_PLUGIN_ROOT` | convention + marketplace (GUI) | shared hooks.json exit 2; runtime bundle has the exit-2 branch; not fired live | shared hooks.json `decision: block`; runtime has the branch; not fired live | Not verified: static bundle read + 7-case execution matrix only; PreCompact is not an event on 3.9 |
 
 A platform without a pre-edit hook keeps only the gate-time `sb submit` check; its row says
 "guard: gate-time only", never a blank cell. Hand every edited shared skill to an uncontaminated

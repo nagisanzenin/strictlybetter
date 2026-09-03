@@ -18,9 +18,17 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-// hooks/sb-campaign/handler.js -> plugin root
+// hooks/sb-campaign/handler.js -> plugin root, when the pack runs from inside the
+// installed plugin (the bundle route). A standalone `openclaw hooks install <dir>`
+// COPIES the pack into the state dir, where ../.. holds no engine — that route sets
+// SB_ROOT in the Gateway environment instead (INSTALL-OPENCLAW.md, Route B).
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ENGINE = join(PLUGIN_ROOT, "scripts", "sb.py");
+function resolveEngine() {
+  const fromEnv = process.env.SB_ROOT ? join(process.env.SB_ROOT, "scripts", "sb.py") : null;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  return join(PLUGIN_ROOT, "scripts", "sb.py");
+}
+const ENGINE = resolveEngine();
 
 const TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;

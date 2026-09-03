@@ -141,11 +141,46 @@ Benchmark: see bench/results/
   one cycle while the campaign is running, under budget, and below the iteration cap.
 - `.claude-plugin/plugin.json` and `marketplace.json`.
 
-**Ports**
+**Ports** (`docs/12-platforms.md`; one `INSTALL-<PLATFORM>.md` each; the honest table in
+`RELEASE_PROTOCOL.md` §7.6 — no platform is "verified live" at 1.0.0, Claude Code included)
 
-- L0 (manual skills + engine) always works; further platforms follow the omniplugin ladder with
-  one `INSTALL-<PLATFORM>.md` each and an honest Verified live / Not verified row in
-  `RELEASE_PROTOCOL.md` §7.6.
+- L0 (clone, point the platform at `skills/`, export `SB_ROOT`) carries the whole loop everywhere;
+  the guard falls back to the gate-time `sb submit` integrity check and the loop is driven by
+  `sb drive --command` wherever the host has no pre-edit or Stop hook.
+- **Codex**: `.codex-plugin/plugin.json` (skills mapped, no `hooks` key — OpenClaw reads the same
+  file), `.agents/plugins/marketplace.json`, `codex/agents/*.toml` (bodies verbatim, the only port
+  with per-agent effort pinning via `model_reasoning_effort`, judge `read-only`),
+  `scripts/install-codex.sh`. Marketplace add / plugin add / whole-repo cache / selftest from the
+  cache ran live on codex-cli 0.149.0-alpha.4.3 in a scratch `CODEX_HOME`; no live session.
+- **OpenCode**: `package.json` + `.opencode-plugin/` (combined `{id, server, setup}` entry, zero
+  SDK imports; self-extract of skills/agents/commands with sha256 ownership so user edits are never
+  overwritten; the engine is never extracted — `SB_ROOT` rides `shell.env`), V1 hook adapters
+  `hooks/*.ts` (nudge, `tool.execute.before` guard that throws on exit 2, compaction pins), V2
+  `setup()` with location-wrapped workspace resolution and feature-detected hooks, 17 `bun test`
+  checks. Plugin and `skills.paths` routes verified live on OpenCode 1.18.23; OpenCode 2.0 not run.
+- **Hermes**: `hooks/session-start-hermes.sh` (dual mode, deduped, fails closed); install by clone +
+  `external_dirs` + `SB_ROOT` in `.env`. Eight skills discovered and the `pre_llm_call` wire shape
+  verified live on v0.18.2 in a scratch `HERMES_HOME`. `/status` and `/stop` collide with built-ins
+  (`/skill status`, `/skill stop`).
+- **Antigravity**: root `plugin.json` with the three schema keys only; no hooks, `SB_ROOT` is an
+  install step. Not verified (`agy` absent; schema URL 404 on 2026-09-03).
+- **OpenClaw**: hook pack `hooks/sb-campaign/` (nudge on `/new` and `/reset`, reads `SB_REPO`,
+  engine via `SB_ROOT` when installed standalone). Hook-pack install and listing verified on the
+  installed 2026.3.2 in an isolated state dir; that build predates the bundle loader, so the plugin
+  route is unverified.
+- **Pi**: `pi/strictlybetter.ts` (exports `SB_ROOT`, fire-and-forget nudge, `tool_call` guard that
+  blocks on exit 2, inert nudge in children) + eight `pi/prompts/` templates (`/strictlybetter`,
+  `/sb-*`, strict-YAML frontmatter) + the `pi` key in `package.json`; 14 fake-host checks and a
+  real-exec harness against a campaign. Pi not installed: not verified live.
+- **DeepSeek Harness**: `dsh/hooks.json` (SessionStart JSON wrapper `hooks/session-start-dsh.sh`,
+  PreToolUse guard, Stop driver), `dsh/cordis.patch.yml`, clone-and-symlink install. Not verified
+  (dsh absent); the hook files pass the shell matrix.
+- **ZCode**: `.zcode-plugin/plugin.json`; the shared hooks already switch to the JSON shape under
+  `ZCODE_PLUGIN_ROOT` / `SB_HOOK_FORMAT=json`. Verified statically against the installed 3.9-line
+  runtime bundle (manifest fallthrough, events, root vars, exit-2 and `decision: block` branches;
+  no PreCompact event) plus an execution matrix; no GUI install, no session.
+- Version now lives in four manifests (`.claude-plugin`, `.codex-plugin`, `.zcode-plugin`,
+  `package.json`) — all in the §6 grep.
 
 **Bench** (`docs/10` §10.7)
 
