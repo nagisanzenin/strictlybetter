@@ -1,3 +1,5 @@
+> **Payload composition is an engine command:** `sb judge-payload <id>` writes `.strictlybetter/inbox/judge-<id>.json` (diff, prereg, screen comparisons, gaming_risks, frozen paths, checklist path). The python composer below is retained only as documentation of the shape.
+
 # Blind judge protocol (shared contract)
 
 For every candidate the engine **promotes** at screen, a separate agent, `sb-judge`, reads the

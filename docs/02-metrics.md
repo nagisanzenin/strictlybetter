@@ -44,7 +44,7 @@ Every metric is a JSON file under `.strictlybetter/metrics/<id>.json`, written w
   "reuse_output": false,
   "hygiene": false,
 
-  "noise": {"sigma": 1.84, "samples": 5, "method": "stdev-of-repeats",
+  "noise": {"sigma": 1.84, "samples": 5, "method": "mad-scaled",
             "measured_at": "3f9a2c1d…", "environment_fingerprint": "darwin-23.6.0-arm64-8cores-py3.12"},
   "probe": {"monotonic": true, "detail": "412.0 -> 388.5 (sigma 1.84)",
             "at": "2026-09-03T10:41:00Z", "commit": "3f9a2c1d…"}
@@ -53,14 +53,14 @@ Every metric is a JSON file under `.strictlybetter/metrics/<id>.json`, written w
 
 Field notes:
 
-- **Required** fields are `id` (`[A-Za-z0-9_.-]`, at most 64 characters), `kind`, `direction`, and `measure` with `command` and `parse`. Everything else is optional and defaults as described below.
+- **Required** fields are `id` (`[A-Za-z0-9_.-]`, at most 64 characters), `kind`, `direction`, and `measure` with `command` and `parse`. Everything else is optional and defaults as described below. Keys starting with `_comment` are stripped by `sb card add`, so a template's annotations may stay in the file.
 - **kind** decides how the acceptance rule treats the metric. A goal must improve; a guardrail must hold; a diagnostic is recorded (at `confirm`, and at `full` when measured on request) but never decides anything.
 - **direction** is `maximize`, `minimize`, or `equal`. An `equal` metric is a guardrail that must match the baseline exactly (a checksum, an API surface, a row count). Its value may be a string. At confirm it is summarized per holdout value, so a checksum may legitimately differ per seed; it is invalid only when the same holdout value disagrees with itself across repeats.
 - **measure** is the base command. `cwd` defaults to `.`, `timeout_s` to 600 (a timeout is an invalid run, never a slow win). `env` is the pinned environment; the harness adds `SB_FIDELITY`, `SB_METRIC`, `PYTHONDONTWRITEBYTECODE=1`, and `PYTHONHASHSEED=0` unless the card sets it. `expected_duration_s` is a validity band `[lo, hi]` on the command's wall-clock; a run outside it is invalid. Only a two-number list counts; a placeholder string is ignored by the engine and is the metrologist's to resolve. `allow_nonzero_exit` lets a command that reports through its output exit non-zero.
 - **parse** takes one of three forms. `metric-line:NAME` reads the last `METRIC NAME=value` line in stdout, then stderr; this is the convention of the autoresearch ecosystem (pi-autoresearch, codex-autoresearch), so an existing bench script can be a card without modification. `regex:PATTERN` takes the last match, using the first capture group if there is one. `json:a.b.0` walks a dotted path into the stdout JSON (the whole output, or the last line that parses). Non-numeric values are kept as strings and are only meaningful for `equal`.
 - **fidelity** is an object keyed `screen`, `full`, `confirm`. Each level overrides only what differs from `measure`: `command`, `parse`, `cwd`, `timeout_s`, `env` (merged over the base), `expected_duration_s`, `allow_nonzero_exit`, `repeats`, `max_repeats`, `holdout`, `skip`. Defaults: `repeats` is 1 at screen and full and 3 at confirm; `max_repeats` equals `repeats`. `skip: true` at screen and full makes a confirm-only metric (a held-out test split). Experiments run at `screen`; `sb confirm` runs `full` when the card defines it, then `confirm`, from a clean checkout. See `05-cost-and-speed.md` for the ladder.
 - **holdout** is read at `confirm` only. `{"kind": "env", "var": "SB_SEED", "values": [...]}` sets the variable per repeat (`var` defaults to `SB_SEED`); `{"kind": "arg", "values": [...]}` substitutes `{holdout}` in the command; `{"kind": "dir", "name": "...", "dest": "..."}` copies `.strictlybetter/holdout/<name>/` into the clean checkout before measuring. Repeats cycle through the values. The experimenter's worktree never contains them.
-- **noise** is measured, not declared. `sb baseline` writes it from the confirm-level repeats: `sigma`, `samples`, `method` (`stdev-of-repeats`), `measured_at` (the commit), `environment_fingerprint`. `sb card add` carries the old `noise` and `probe` forward when a re-added card omits them. A goal or guardrail without a measured sigma halts `sb campaign start`.
+- **noise** is measured, not declared. `sb baseline` writes it from the confirm-level repeats: `sigma`, `samples`, `method` (`mad-scaled`, 1.4826 × the median absolute deviation, when there are at least four repeats; `stdev-of-repeats` for two or three), `measured_at` (the commit), `environment_fingerprint`. `sb card add` carries the old `noise` and `probe` forward when a re-added card omits them. A goal or guardrail without a measured sigma halts `sb campaign start`.
 - **probe** is written by `sb card probe`: whether the degradation moved the metric the wrong way, the before and after values, and the commit.
 - **acceptance** overrides the campaign defaults `kappa` (2.5) and `tolerance_sigma` (1.0) for this card. A `tolerance_sigma` of 0 means any regression fails.
 - **integrity.frozen_paths** freezes the instrument. The union of every campaign card's frozen paths plus the campaign's own `frozen_paths` is hashed at campaign start into `campaign.json` (`eval_hash`, `frozen_paths_effective`); the hash lives there, not on the card. A diff touching a frozen path, or one that changes the hash, fails `sb submit`; two consecutive failures halt the campaign for human review. Instrument changes are legitimate only in an instrument campaign (see `07-universality.md`).
@@ -76,7 +76,7 @@ Field notes:
 | Property | Why it matters | How it is obtained |
 |---|---|---|
 | Cost (seconds, dollars) | Decides fidelity ladder and batch sizes | Measured during baseline (`secs_per_run` per fidelity level in `baseline.json`) |
-| Noise (sigma) | Decides acceptance threshold | Measured: k repeats at the same commit |
+| Noise (sigma) | Decides acceptance threshold | Measured: k repeats at the same commit; 1.4826 × MAD for k ≥ 4 (robust to load bursts), sample standard deviation for k of 2 or 3 |
 | Sensitivity | A metric that does not move under plausible changes is useless as a goal | Monotonicity probe (`sb card probe`); wider sensitivity probes are the metrologist's experiments, not an engine command |
 | Direction | Sign of improvement | Declared |
 | Gameability | Which cheap tricks would inflate it | Declared by metrologist, checked by judge |
@@ -113,11 +113,12 @@ A campaign is a named, versioned metric set with a budget. `sb campaign start --
 }
 ```
 
-Every field except `goals` has a default: `budget` is `{"experiments": 40}`, `branch` is `sb/<id>`, `plateau_patience` is 8, `max_parallel` is 2, `distill_every` is 8, `iteration_cap` is 200, and every wall is true. The engine writes the result to `.strictlybetter/campaign.json` together with the fields it owns: `status` (`running` | `halted` | `ended`), `halt_reason`, `base_commit`, `head_commit`, `eval_hash`, `frozen_paths_effective`, `spent`, `exploration_level`, `since_last_accept`, `accepted_ids`, `consecutive_integrity`, `consecutive_gamed`, `screen_repeats_multiplier`, `screen_untrusted`, `holdout_override`, `next_id`. Only the harness writes this file.
+Every field except `goals` has a default: `budget` is `{"experiments": 40}`, `branch` is `sb/<id>`, `plateau_patience` is 8, `max_parallel` is 2, `distill_every` is 8, `iteration_cap` is 200, and every wall is true. The engine writes the result to `.strictlybetter/campaign.json` together with the fields it owns: `status` (`running` | `halted` | `ended`), `halt_reason`, `base_commit`, `head_commit`, `eval_hash`, `frozen_paths_effective`, `spent`, `mde` (each goal's minimum detectable effect), `exploration_level`, `since_last_accept`, `accepted_ids`, `consecutive_integrity`, `consecutive_gamed`, `screen_repeats_multiplier`, `screen_untrusted`, `holdout_override`, `next_id`. Only the harness writes this file.
 
 Rules:
 
 - A campaign has at least one goal and always includes the **hygiene guardrails** (every card flagged `hygiene`: build, tests, lint), whether or not the user listed them. It also inherits the global ratchet (§2.5) as guardrails.
+- A goal must be detectable on this host. At start the engine computes each goal's **minimum detectable effect**, `κ · σ · √(1/r + 1/n) / |best|` with `r` the confirm repeats and `n` the baseline repeats, and halts with `instrument-unusable` when it exceeds 50% (`--allow-unusable` overrides; raising `-k` or the confirm repeats is the honest fix).
 - The metric set is frozen once the campaign starts. `sb card add` refuses to change a goal or guardrail card while a campaign is running. Changing the set means ending the campaign and starting another. This is pre-registration at the campaign level.
 - **composition: pareto** means a change is accepted only if it improves at least one goal beyond its noise floor and does not regress any other goal or guardrail beyond tolerance. This is the default.
 - **composition: oec** allows a single Overall Evaluation Criterion with declared weights, for the case where the user has decided a trade-off in advance (for example, one point of accuracy is worth ten percent latency). The score is the weighted sum of each goal's delta in sigma units and must exceed κ_eff; guardrails still hold. Weights (`oec_weights`) are part of the frozen set.
@@ -132,7 +133,7 @@ Let `A` be the current best state, `A'` the candidate, `m_x(·)` the measurement
 4. Judgment: the blind judge finds no gaming pattern (see `04-anti-overfitting.md`).
 5. Confirmation independence: the numbers in (1) and (2) come from the harness's confirmation run, not from the screening run the experimenter observed.
 
-Defaults: `κ = 2.5`, `τ = 1.0`, overridable per card in `acceptance`. In the engine: a goal *improves* when `Δ > κ_eff · σ`, *regresses* when `Δ < −τ · σ`, and is *inconclusive* when `0 < Δ ≤ κ_eff · σ`; a sigma of zero makes any move decisive. Larger diffs raise κ: `κ_eff = κ · (1 + 0.3 · ln(1 + diff_lines / 50)) + 1.0 · σ` per touched dependency manifest (the complexity regularizer in `04-anti-overfitting.md`).
+Defaults: `κ = 2.5`, `τ = 1.0`, overridable per card in `acceptance`. In the engine: a goal *improves* when `Δ > κ_eff · σ · f`, *regresses* when `Δ < −τ · σ · f`, and is *inconclusive* when `0 < Δ ≤ κ_eff · σ · f`, where `f = √(1/n_new + 1/n_base)` scales sigma to a comparison of a median of `n_new` repeats against a baseline median of `n_base`; a sigma of zero makes any move decisive. Larger diffs raise κ: `κ_eff = κ · (1 + 0.3 · ln(1 + diff_lines / 50)) + 1.0 · σ` per touched dependency manifest (the complexity regularizer in `04-anti-overfitting.md`).
 
 This is the Ladder mechanism of Blum and Hardt (2015) applied to a repository: report a new best only when it beats the previous best by more than a step size, otherwise keep the old value. The Ladder is the theoretical reason a threshold-ratchet resists adaptive overfitting; the noise floor gives the step size a physical meaning.
 

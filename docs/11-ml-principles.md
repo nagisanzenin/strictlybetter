@@ -30,3 +30,5 @@ Two principles deliberately do not transfer:
 
 - **Gradient descent.** There is no differentiable path through a repository. All search here is zeroth-order; the hypotheses are the gradient estimator and they are as good as the diagnostics that ground them.
 - **Large batch sizes.** Measurement contention destroys the noise floor. Parallelism is bounded by the measurement host, not by the number of ideas.
+
+Rows whose mechanism is design rather than shipped code in v1.0: early termination of bad runs (no early kill), simulated annealing (no side branch), change-point detection (no drift check; re-baseline is by hand), meta-learning across tasks (archetype priors are static files, updated only by a plugin release), and ablation study (the experimenter's own experiments, not an engine command). See the "not in v1.0" notes in the linked docs.

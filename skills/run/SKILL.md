@@ -130,52 +130,21 @@ Work through this list for each id; stop at the first branch that ends it.
    - `discard` → `$SB discard <id> --reason <reason> --archive` when the judge's `"improved"` list is non-empty or any goal comparison line shows a positive `delta`; without `--archive` otherwise. `<reason>` is the judge's `"reason"` when its prefix (before `:`) is one of `noise|regression|invalid`; else `noise`. Done.
    - `accept-naive` (confirm wall off) → `$SB confirm <id>` then `$SB accept <id>`. Done.
    - `promote` → continue.
-5. **Blind judge** → compose the payload with the block below (verbatim, with `ID` set), spawn `sb-judge` (`strictlybetter:sb-judge`) with only the payload path in the task text (*"Judge the strictlybetter experiment described in `<path>`. Return only the verdict JSON."*), write its four-key JSON to `$SB_REPO/.strictlybetter/inbox/verdict-<id>.json` with the Write tool, then `$SB judge-verdict <id> --file "$SB_REPO/.strictlybetter/inbox/verdict-<id>.json"`.
+5. **Blind judge** → `P="$($SB judge-payload <id>)"`, spawn `sb-judge` (`strictlybetter:sb-judge`) with only the payload path in the task text (*"Judge the strictlybetter experiment described in `<path>`. Return only the verdict JSON."*), write its four-key JSON to `$SB_REPO/.strictlybetter/inbox/verdict-<id>.json` with the Write tool, then `$SB judge-verdict <id> --file "$SB_REPO/.strictlybetter/inbox/verdict-<id>.json"`.
    - `gamed` → `$SB discard <id> --reason gamed`. Done.
    - `clean` or `suspicious` → continue (the engine adds repeats for `suspicious`).
 6. **Confirm** → `$SB confirm <id>`. Read `"verdict"` from its first line.
 7. **Cost** (before the final verb, so the bandit sees it) → `$SB cost <id> --wall-s <experimenter seconds> --tier <low|medium|high>`. Tokens are unknown on this platform; the dollars column is an estimate from zero tokens, and the cycle summary says "estimated".
 8. **Final verb** → confirm `accept` → `$SB accept <id>` (fast-forwards the campaign branch, ratchets the baseline). If `accept` reports "not a fast-forward", treat as STALE in step 3. Confirm `discard` → `$SB discard <id> --reason <reason> --archive` with `<reason>` the confirm line's `"reason"` when its prefix is in the fixed vocabulary, else `noise`.
 
-Judge payload composer (from `skills/_shared/judge-protocol.md`; run for step 5):
+Judge payload (step 5): the engine composes it, so no transcript text can leak into it:
 
 ```bash
-# Compose the blind judge's payload. RUN THIS BLOCK VERBATIM after `$SB judge $ID` printed
-# "verdict": "promote". Set ID first. Requires the engine-resolution block ($SB, $SB_ROOT…).
-ID=e0001
-IN="$SB_REPO/.strictlybetter/inbox"; mkdir -p "$IN"
-W="$($SB worktree path "$ID")"
-git -C "$W" diff "$(git -C "$W" rev-parse HEAD^)" HEAD > "$IN/judge-$ID.diff"
-$SB ledger view "$ID" > "$IN/judge-$ID.record.json"
-$SB next --json > "$IN/judge-$ID.brief.json"
-python3 - "$ID" "$IN" "$SB_ROOT" "$SB_PY" "$SB_REPO" <<'PY'
-import json, re, subprocess, sys
-eid, inbox, root, sb_py, repo = sys.argv[1:6]
-assert re.fullmatch(r"e\d{4,}", eid), f"bad experiment id {eid!r}"
-rec = json.load(open(f"{inbox}/judge-{eid}.record.json"))
-brief = json.load(open(f"{inbox}/judge-{eid}.brief.json"))
-js = rec.get("judge_stat") or {}
-risks = {}
-for mid in list(brief.get("goals") or []) + list(brief.get("guardrails") or []):
-    out = subprocess.run([sys.executable, sb_py, "--repo", repo, "card", "show", mid], capture_output=True, text=True).stdout
-    risks[mid] = (json.loads(out).get("gaming_risks") or []) if out.strip() else []
-payload = {
-    "id": eid,
-    "checklist": f"{root}/templates/judge-checklist.md",
-    "prereg": {k: rec.get(k) for k in ["operator", "target", "hypothesis", "predicted", "mechanism", "expected_diff_size", "prereg_hash"]},
-    "diff": {"lines": rec.get("diff_lines"), "files": rec.get("files"), "new_deps": rec.get("new_deps"),
-             "text": open(f"{inbox}/judge-{eid}.diff", encoding="utf-8", errors="replace").read()},
-    "screen": {"verdict": js.get("verdict"), "reason": js.get("reason"), "kappa_eff": js.get("kappa_eff"),
-               "anomaly": js.get("anomaly"), "comparisons": js.get("comparisons")},
-    "gaming_risks": risks,
-    "frozen_paths": brief.get("frozen_paths"),
-    "protected_paths": brief.get("protected_paths"),
-}
-with open(f"{inbox}/judge-{eid}.json", "w", encoding="utf-8") as f:
-    json.dump(payload, f, indent=2)
-print(f"{inbox}/judge-{eid}.json")
-PY
+P="$($SB judge-payload <id>)"   # writes .strictlybetter/inbox/judge-<id>.json and prints the path
 ```
+
+The file holds the diff, the pre-registration, the screen comparisons, the affected cards'
+`gaming_risks`, the frozen paths, and the checklist path. Hand the judge that path and nothing else.
 
 ## (e) Cost is recorded per experiment
 

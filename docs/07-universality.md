@@ -64,5 +64,5 @@ The rule is unchanged: the measurement must be a command the experimenter cannot
 ## 7.6 What universality costs
 
 - Discovery is heuristic. The archetype table will be wrong for unusual projects; the human gate exists to catch that.
-- Some metrics are too noisy on a developer machine (sub-millisecond latency, GPU throughput on a shared box). The loop reports these as unusable rather than pretending; a dedicated measurement host is a configuration option, not a requirement.
+- Some metrics are too noisy on a developer machine (sub-millisecond latency, GPU throughput on a shared box). The loop reports these as unusable rather than pretending (`sb campaign start` halts with `instrument-unusable` when a goal's minimum detectable effect exceeds 50%); a dedicated measurement host is a configuration option, not a requirement.
 - Some projects have no cheap fidelity level (a full training run is the only measurement). The loop still works, with fewer, better-chosen hypotheses; the bandit and the diagnostics matter more.

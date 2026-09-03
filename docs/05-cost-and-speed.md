@@ -93,7 +93,7 @@ These numbers are in the campaign report and the inheritance body. A campaign wh
 
 ## 5.9 What is not optimized
 
-- The noise floor is never lowered to save money. If a metric needs 7 repeats to be trustworthy on this machine, it gets 7 or it is quarantined.
+- The noise floor is never lowered to save money. If a metric needs 7 repeats to be trustworthy on this machine, it gets 7 or it is quarantined. The minimum-detectable-effect gate is the same rule at campaign start: a goal whose smallest detectable improvement exceeds 50% on this host halts the start (`04-anti-overfitting.md` §4.2).
 - Confirmation is never skipped. A candidate the loop cannot afford to confirm is not accepted; it is archived with `budget` and the report says so.
 - The judge is never skipped for promoted candidates. Its cost is small relative to a false acceptance.
 
