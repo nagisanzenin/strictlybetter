@@ -1,6 +1,6 @@
 # 10 · Implementation plan
 
-Repo `nagisanzenin/researchloop`, product `strictlybetter`, Claude Code first, then the omniplugin port ladder. This plan follows the conventions the sibling plugins (engram, effortmining, dosimeter, production-grade, omniplugin) converged on, so a maintainer of one can maintain this.
+Repo `nagisanzenin/strictlybetter`, product `strictlybetter`, Claude Code first, then the omniplugin port ladder. This plan follows the conventions the sibling plugins (engram, effortmining, dosimeter, production-grade, omniplugin) converged on, so a maintainer of one can maintain this.
 
 ## 10.1 Principles inherited from the sibling plugins
 
@@ -16,7 +16,7 @@ Repo `nagisanzenin/researchloop`, product `strictlybetter`, Claude Code first, t
 ## 10.2 Repository layout
 
 ```
-researchloop/
+strictlybetter/
   README.md  LICENSE  CHANGELOG.md  RELEASE_PROTOCOL.md  CLAUDE.md
   docs/                         # this theory; docs/00-* is the cold-start doc
   .claude-plugin/plugin.json    # {name: strictlybetter, version, description, author, homepage, keywords}

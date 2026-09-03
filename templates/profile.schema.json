@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/nagisanzenin/researchloop/templates/profile.schema.json",
+  "$id": "https://github.com/nagisanzenin/strictlybetter/templates/profile.schema.json",
   "title": "strictlybetter profile",
   "description": "The JSON sb-orienteer returns via --file. The harness validates it against this schema and renders templates/profile.md.tmpl from it. Section numbers in the template map to properties here.",
   "type": "object",

@@ -18,7 +18,7 @@ skills/, agents/, scripts/sb.py   # SHARED
 
 ZCode reads this repository as a marketplace (it consumes `.claude-plugin/marketplace.json`):
 
-1. **Settings → Plugin Management → Discover**, press **`+`**, add `https://github.com/nagisanzenin/researchloop`.
+1. **Settings → Plugin Management → Discover**, press **`+`**, add `https://github.com/nagisanzenin/strictlybetter`.
 2. Select **strictlybetter**, click **Install**.
 3. Restart ZCode (or start a new session) so skills re-scan.
 
@@ -27,7 +27,7 @@ You get, with zero config: the eight skills as `/strictlybetter`, `/run`, `/stat
 ### Route B · clone + symlink
 
 ```sh
-git clone https://github.com/nagisanzenin/researchloop ~/.agents/strictlybetter
+git clone https://github.com/nagisanzenin/strictlybetter ~/.agents/strictlybetter
 SKILLS="$HOME/.agents/skills"        # or ~/.zcode/skills for a ZCode-only install
 mkdir -p "$SKILLS"
 for s in strictlybetter orient metrics run status distill stop bench; do

@@ -40,7 +40,7 @@ where in `scripts/sb.py` the class would live.
 ## 0 · Preconditions
 
 ```bash
-cd ~/Documents/Github/researchloop
+cd ~/Documents/Github/strictlybetter
 git checkout -b release/vX.Y.Z              # never work on main directly
 python3 scripts/sb.py selftest              # must already be green: "N/N checks passed"
 python3 -m unittest discover -s tests       # must already be OK
@@ -280,10 +280,10 @@ Selftest proves the units; this proves a campaign. Never on a real repo.
 
 ```bash
 python3 tests/fixtures/make_fixture.py pyfix /tmp/sb-live && cd /tmp/sb-live
-SB="python3 $HOME/Documents/Github/researchloop/scripts/sb.py"
+SB="python3 $HOME/Documents/Github/strictlybetter/scripts/sb.py"
 $SB init
 for c in bench_ms tests_failed bench_checksum loc; do
-  $SB card add --file ~/Documents/Github/researchloop/tests/fixtures/pyfix/fixture-cards/$c.json; done
+  $SB card add --file ~/Documents/Github/strictlybetter/tests/fixtures/pyfix/fixture-cards/$c.json; done
 $SB card probe bench_ms                                  # degradation must hurt
 $SB campaign start --file campaign.json                  # goals [bench_ms]; guardrails [tests_failed, bench_checksum]
 $SB prereg --file hyp.json                               # → e0001 + worktree path
@@ -324,8 +324,8 @@ cp -R ~/Documents/Github/dosimeter /tmp/sb-dogfood && cd /tmp/sb-dogfood
 # print the version the harness will LOAD, against the version you are SHIPPING:
 python3 -c "import json;d=json.load(open('$HOME/.claude/plugins/installed_plugins.json'));\
 print([v[0]['version'] for k,v in d['plugins'].items() if 'strictlybetter' in k.lower()])"
-grep -m1 '"version"' ~/Documents/Github/researchloop/.claude-plugin/plugin.json
-claude --plugin-dir ~/Documents/Github/researchloop      # the release tree, never the cache
+grep -m1 '"version"' ~/Documents/Github/strictlybetter/.claude-plugin/plugin.json
+claude --plugin-dir ~/Documents/Github/strictlybetter      # the release tree, never the cache
 ```
 
 Not equal, and not using `--plugin-dir` → stop. engram once certified a release against a plugin

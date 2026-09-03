@@ -1,6 +1,6 @@
 # CLAUDE.md — maintainer notes for strictlybetter
 
-**What this repo is.** strictlybetter (repo name `researchloop`) is a research loop for agentic
+**What this repo is.** strictlybetter (github.com/nagisanzenin/strictlybetter) is a research loop for agentic
 coders. Pointed at a repo, it derives the project's metrics into *metric cards*, measures their
 noise, and runs pre-registered experiments under a budget, keeping a change only when it is
 strictly better: better on a goal by more than κσ, worse on no guardrail, confirmed on a holdout

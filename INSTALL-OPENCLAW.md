@@ -22,22 +22,22 @@ skills/, agents/*.md, scripts/sb.py   # SHARED
 ### Route A — plugin (OpenClaw ≥ 2026.7, bundle loader)
 
 ```bash
-openclaw plugins install strictlybetter --marketplace nagisanzenin/researchloop   # reads .claude-plugin/marketplace.json
+openclaw plugins install strictlybetter --marketplace nagisanzenin/strictlybetter   # reads .claude-plugin/marketplace.json
 openclaw config set hooks.internal.enabled true      # NOT optional: without it plugin hooks are listed "ready" and never run
 openclaw gateway restart
 ```
 
-A local clone works too (`openclaw plugins install /path/to/researchloop`). The plugin stages under `${OPENCLAW_STATE_DIR:-~/.openclaw}/extensions/strictlybetter/`.
+A local clone works too (`openclaw plugins install /path/to/strictlybetter`). The plugin stages under `${OPENCLAW_STATE_DIR:-~/.openclaw}/extensions/strictlybetter/`.
 
 Then, in the Gateway's environment: `SB_ROOT=<that extensions dir>` (the skills' resolution waterfall has no OpenClaw landmark and OpenClaw sets no plugin-root variable) and `SB_REPO=<the repository you are optimizing>` (a gateway has no project directory; the nudge reads this).
 
 ### Route B — clone + hook pack (works on 2026.3.x too)
 
 ```bash
-git clone https://github.com/nagisanzenin/researchloop ~/researchloop
-openclaw hooks install ~/researchloop/hooks/sb-campaign     # copies the pack into $STATE/hooks/sb-campaign/
+git clone https://github.com/nagisanzenin/strictlybetter ~/strictlybetter
+openclaw hooks install ~/strictlybetter/hooks/sb-campaign     # copies the pack into $STATE/hooks/sb-campaign/
 openclaw config set hooks.internal.enabled true
-# Gateway env: SB_ROOT=$HOME/researchloop  SB_REPO=/path/to/the/repo
+# Gateway env: SB_ROOT=$HOME/strictlybetter  SB_REPO=/path/to/the/repo
 openclaw gateway restart
 ```
 

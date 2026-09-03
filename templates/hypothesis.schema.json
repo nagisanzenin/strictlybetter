@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/nagisanzenin/researchloop/templates/hypothesis.schema.json",
+  "$id": "https://github.com/nagisanzenin/strictlybetter/templates/hypothesis.schema.json",
   "title": "strictlybetter pre-registered hypothesis",
   "description": "docs/03 \u00a7HYPOTHESIZE plus `mechanism`. `sb prereg --file` validates this and writes the ledger line before any diff exists. The operator must be one of the 13 ids in operators/. Predicted effects are strings in the form <signed number>[..<signed number>][ unit] so the harness can compare them to confirmed effects.",
   "type": "object",

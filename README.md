@@ -13,7 +13,7 @@ Point it at any repo or science project. It figures out what to measure, learns 
 ## 60-second start
 
 ```bash
-claude plugin marketplace add nagisanzenin/researchloop
+claude plugin marketplace add nagisanzenin/strictlybetter
 claude plugin install strictlybetter@strictlybetter
 cd your-repo
 claude
@@ -91,11 +91,11 @@ Prompts are advice. Hooks and hashes are walls.
 
 | Platform | Install | Invoke |
 |---|---|---|
-| **Claude Code** | `claude plugin marketplace add nagisanzenin/researchloop` then `claude plugin install strictlybetter@strictlybetter` | `/strictlybetter` |
-| **OpenAI Codex** | `codex plugin marketplace add nagisanzenin/researchloop` then `codex plugin add strictlybetter@strictlybetter` · [INSTALL-CODEX.md](INSTALL-CODEX.md) | `$strictlybetter` |
+| **Claude Code** | `claude plugin marketplace add nagisanzenin/strictlybetter` then `claude plugin install strictlybetter@strictlybetter` | `/strictlybetter` |
+| **OpenAI Codex** | `codex plugin marketplace add nagisanzenin/strictlybetter` then `codex plugin add strictlybetter@strictlybetter` · [INSTALL-CODEX.md](INSTALL-CODEX.md) | `$strictlybetter` |
 | **OpenCode** | [INSTALL-OPENCODE-V2.md](INSTALL-OPENCODE-V2.md) | `/strictlybetter` |
 | **Hermes** | [INSTALL-HERMES.md](INSTALL-HERMES.md) | `/skill strictlybetter` |
-| **Google Antigravity** | `agy plugin install https://github.com/nagisanzenin/researchloop` · [INSTALL-ANTIGRAVITY.md](INSTALL-ANTIGRAVITY.md) | `/strictlybetter` |
+| **Google Antigravity** | `agy plugin install https://github.com/nagisanzenin/strictlybetter` · [INSTALL-ANTIGRAVITY.md](INSTALL-ANTIGRAVITY.md) | `/strictlybetter` |
 | **OpenClaw** | [INSTALL-OPENCLAW.md](INSTALL-OPENCLAW.md) | `/strictlybetter` |
 | **Pi** | [INSTALL-PI.md](INSTALL-PI.md) | `/strictlybetter` |
 | **DeepSeek Harness** | [INSTALL-DSH.md](INSTALL-DSH.md) | `/strictlybetter` |

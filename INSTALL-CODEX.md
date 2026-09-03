@@ -21,7 +21,7 @@ hooks/hooks.json + hooks/*.sh      # SHARED — SessionStart, PreToolUse guard, 
 ### Route A — as a plugin (skills + hooks)
 
 ```bash
-codex plugin marketplace add nagisanzenin/researchloop    # or a local clone path
+codex plugin marketplace add nagisanzenin/strictlybetter    # or a local clone path
 codex plugin add strictlybetter@strictlybetter            # or /plugin install in-session
 bash <plugin-cache-or-clone>/scripts/install-codex.sh     # the TOML agents → ~/.codex/agents/
 # restart Codex / reload plugins
@@ -34,10 +34,10 @@ The eight skills become available as `$strictlybetter`, `$orient`, `$metrics`, `
 Any Agent Skills installer works, because `skills/*/SKILL.md` is the open standard:
 
 ```bash
-git clone https://github.com/nagisanzenin/researchloop ~/researchloop
-npx skills add nagisanzenin/researchloop          # symlinks the skills into your agent dirs
-export SB_ROOT="$HOME/researchloop"               # the skills find the engine through SB_ROOT on this route
-bash ~/researchloop/scripts/install-codex.sh
+git clone https://github.com/nagisanzenin/strictlybetter ~/strictlybetter
+npx skills add nagisanzenin/strictlybetter          # symlinks the skills into your agent dirs
+export SB_ROOT="$HOME/strictlybetter"               # the skills find the engine through SB_ROOT on this route
+bash ~/strictlybetter/scripts/install-codex.sh
 ```
 
 On this route no plugin-root variable exists, so `SB_ROOT` is mandatory: the skills' engine-resolution block fails closed ("engine not found — set SB_ROOT") rather than run `python3 ""`. Hooks do not ride Route B; the guard is the gate-time `sb submit` check and the loop is driven with `sb drive --command 'codex exec "…"'`.

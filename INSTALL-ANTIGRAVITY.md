@@ -18,7 +18,7 @@ No `commands/` (Antigravity has no such concept, and a root `commands/` would le
 ## Install
 
 ```bash
-agy plugin install https://github.com/nagisanzenin/researchloop
+agy plugin install https://github.com/nagisanzenin/strictlybetter
 export SB_ROOT="$HOME/.gemini/antigravity-cli/plugins/strictlybetter"   # add to your shell rc
 ```
 

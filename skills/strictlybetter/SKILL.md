@@ -19,7 +19,7 @@ Read `skills/_shared/subagents.md` from `$SB_ROOT` before the first spawn.
 # Order: ZCode's plugin root (ZCode also exports the legacy CLAUDE_PLUGIN_ROOT, so its own
 # var is checked first), Claude Code, Codex, an explicit checkout (SB_ROOT), the Claude Code
 # plugin cache (newest version), and LAST the working tree's git toplevel (a contributor
-# running inside the researchloop checkout). First one that holds scripts/sb.py wins.
+# running inside the strictlybetter checkout). First one that holds scripts/sb.py wins.
 SB_PY=""
 SB_CACHE="$(find "$HOME/.claude/plugins/cache" -maxdepth 5 -path '*/strictlybetter/*/scripts/sb.py' 2>/dev/null | sort | tail -n 1)"
 for d in "${ZCODE_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT:-}" "${SB_ROOT:-}" \
@@ -27,7 +27,7 @@ for d in "${ZCODE_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}" "${CODEX_PLUGIN_ROOT
   [ -n "$d" ] && [ -f "$d/scripts/sb.py" ] && SB_PY="$d/scripts/sb.py" && break
 done
 if [ -z "$SB_PY" ]; then
-  echo "strictlybetter: engine not found — set SB_ROOT to your researchloop checkout" >&2
+  echo "strictlybetter: engine not found — set SB_ROOT to your strictlybetter checkout" >&2
   return 2 2>/dev/null || exit 2   # FAIL CLOSED: proceeding would run `python3 ""`
 fi
 SB_ROOT="${SB_PY%/scripts/sb.py}"

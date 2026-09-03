@@ -42,7 +42,7 @@ Next steps:
      engine is, because no plugin-root variable is set on that route:
        export SB_ROOT="$REPO_ROOT"     # add to your shell rc
   2. Install the skills (if not via 'codex plugin add'):
-       npx skills add nagisanzenin/researchloop
+       npx skills add nagisanzenin/strictlybetter
   3. In Codex, invoke skills as \$strictlybetter / \$run / \$status …, and the agents
      explicitly, e.g. "\$sb-judge, judge the experiment in <payload path>".
 

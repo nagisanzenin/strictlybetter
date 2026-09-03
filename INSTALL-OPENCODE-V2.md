@@ -33,17 +33,17 @@ In any `opencode.json` / `opencode.jsonc` (project or `~/.config/opencode/`):
 }
 ```
 
-Until the npm package is published, pin the git source or a local clone instead: `"plugin": ["git+https://github.com/nagisanzenin/researchloop.git"]` or `"plugin": ["/absolute/path/to/researchloop"]` (V2 local checkouts must point at the entry file: `".../researchloop/.opencode-plugin/v2.ts"`). Do **not** write `"opencode-strictlybetter/v2"` — V2 parses that as a GitHub spec.
+Until the npm package is published, pin the git source or a local clone instead: `"plugin": ["git+https://github.com/nagisanzenin/strictlybetter.git"]` or `"plugin": ["/absolute/path/to/strictlybetter"]` (V2 local checkouts must point at the entry file: `".../strictlybetter/.opencode-plugin/v2.ts"`). Do **not** write `"opencode-strictlybetter/v2"` — V2 parses that as a GitHub spec.
 
 First start self-extracts `skills/` (with `_shared/`), transformed `agents/`, and generated `commands/` into `.opencode/` (or `~/.config/opencode/` when the project has no opencode config) and, on V1, bridges them into the running config so `/strictlybetter`, `/sb-run` and the subagents work in that same session; V2 reloads its domains instead. Later sessions use disk discovery.
 
 ### Route B — skills only (zero adapter code)
 
 ```jsonc
-{ "skills": { "paths": ["~/researchloop/skills"] } }
+{ "skills": { "paths": ["~/strictlybetter/skills"] } }
 ```
 
-plus `export SB_ROOT=~/researchloop` in the shell that starts OpenCode. Eight skills, no commands, no subagents, no hooks — the whole loop still runs (the skills spawn agents through OpenCode's `task` tool only if agents are registered; on this route say so and drive the loop by hand or with `sb drive`).
+plus `export SB_ROOT=~/strictlybetter` in the shell that starts OpenCode. Eight skills, no commands, no subagents, no hooks — the whole loop still runs (the skills spawn agents through OpenCode's `task` tool only if agents are registered; on this route say so and drive the loop by hand or with `sb drive`).
 
 ## What the adapter does
 

@@ -6,12 +6,12 @@
    repo you are optimizing until you mean it):
 
    ```bash
-   git clone https://github.com/nagisanzenin/researchloop
+   git clone https://github.com/nagisanzenin/strictlybetter
    mkdir /tmp/sb-play && cd /tmp/sb-play && git init -q
    cat > opencode.json <<EOF
    {
      "\$schema": "https://opencode.ai/config.json",
-     "plugin": ["/absolute/path/to/researchloop"]
+     "plugin": ["/absolute/path/to/strictlybetter"]
    }
    EOF
    ```

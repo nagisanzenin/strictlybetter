@@ -18,7 +18,7 @@ agents/*.md                        # prompt sources for delegate_task (judge, ex
 **1 · Clone** (don't use `hermes skills install` — see the warning below):
 
 ```bash
-git clone https://github.com/nagisanzenin/researchloop ~/researchloop
+git clone https://github.com/nagisanzenin/strictlybetter ~/strictlybetter
 ```
 
 **2 · Register the skills and the engine root** — in `~/.hermes/config.yaml` under `skills:`:
@@ -26,13 +26,13 @@ git clone https://github.com/nagisanzenin/researchloop ~/researchloop
 ```yaml
 skills:
   external_dirs:
-    - ~/researchloop/skills
+    - ~/strictlybetter/skills
 ```
 
 and tell the skills where their engine lives:
 
 ```bash
-echo "SB_ROOT=$HOME/researchloop" >> ~/.hermes/.env
+echo "SB_ROOT=$HOME/strictlybetter" >> ~/.hermes/.env
 ```
 
 (The skills resolve `scripts/sb.py` through `$SB_ROOT` when no platform plugin-root variable is set — and Hermes sets none. Hermes loads `~/.hermes/.env` at startup and local terminal subprocesses inherit it.)
@@ -42,7 +42,7 @@ echo "SB_ROOT=$HOME/researchloop" >> ~/.hermes/.env
 ```yaml
 hooks:
   pre_llm_call:
-    - command: "/Users/you/researchloop/hooks/session-start-hermes.sh"   # absolute path
+    - command: "/Users/you/strictlybetter/hooks/session-start-hermes.sh"   # absolute path
       timeout: 15
 ```
 
@@ -68,7 +68,7 @@ Hermes has real subagents: `delegate_task` children start with a completely fres
 
 ```
 delegate_task(
-  goal="Act as strictlybetter's blind judge: read ~/researchloop/agents/sb-judge.md and follow it exactly.",
+  goal="Act as strictlybetter's blind judge: read ~/strictlybetter/agents/sb-judge.md and follow it exactly.",
   context="Judge the strictlybetter experiment described in <repo>/.strictlybetter/inbox/judge-e0007.json. Return only the verdict JSON."
 )
 ```
@@ -86,7 +86,7 @@ Hermes offers `pre_llm_call` only. So on Hermes: no PreToolUse guard (the frozen
 ## Verify the install
 
 ```bash
-python3 ~/researchloop/scripts/sb.py selftest          # 61/61, same engine everywhere
+python3 ~/strictlybetter/scripts/sb.py selftest          # 61/61, same engine everywhere
 hermes skills list --source local                       # eight rows, no _shared
 hermes hooks doctor                                     # script exists, executable, allowlisted
 cd <a repo with a running campaign> && hermes hooks test pre_llm_call   # {"context": "[strictlybetter] campaign … running: …"}

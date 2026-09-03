@@ -6,7 +6,7 @@
 #     Register in ~/.hermes/config.yaml:
 #       hooks:
 #         pre_llm_call:
-#           - command: "/path/to/researchloop/hooks/session-start-hermes.sh"
+#           - command: "/path/to/strictlybetter/hooks/session-start-hermes.sh"
 #             timeout: 15
 #   plain mode (stdin empty — e.g. `hermes cron create --no-agent --script …`):
 #     print the nudge as plain text (nothing when nothing to say).

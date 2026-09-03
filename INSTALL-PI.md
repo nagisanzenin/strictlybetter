@@ -22,10 +22,10 @@ skills/, agents/, scripts/sb.py   # SHARED
 ## Install
 
 ```bash
-pi install git:github.com/nagisanzenin/researchloop
+pi install git:github.com/nagisanzenin/strictlybetter
 ```
 
-Pi clones the repo to `~/.pi/agent/git/github.com/nagisanzenin/researchloop`, runs `npm install` there (the package has **zero dependencies**, so nothing is installed), and registers the package. `pi update` tracks the default branch. A local clone works too: `pi install /path/to/researchloop`.
+Pi clones the repo to `~/.pi/agent/git/github.com/nagisanzenin/strictlybetter`, runs `npm install` there (the package has **zero dependencies**, so nothing is installed), and registers the package. `pi update` tracks the default branch. A local clone works too: `pi install /path/to/strictlybetter`.
 
 ## Invoking
 
@@ -61,7 +61,7 @@ SB_CHILD=1 pi --no-session --no-skills --no-context-files -p \
 ## Verify the install
 
 ```bash
-python3 ~/.pi/agent/git/github.com/nagisanzenin/researchloop/scripts/sb.py selftest   # 61/61
+python3 ~/.pi/agent/git/github.com/nagisanzenin/strictlybetter/scripts/sb.py selftest   # 61/61
 pi config                    # strictlybetter listed with skills/extension/prompts enabled
 pi                           # type /  — strictlybetter, sb-run, … in the picker
 ```
@@ -74,4 +74,4 @@ pi                           # type /  — strictlybetter, sb-run, … in the pi
 - The same extension with **real** `execFile` against a pyfix campaign: `tool_call edit …/wt/e0001/bench.py` → `{"block":true,"reason":"strictlybetter guard: denied edit to …/bench.py: frozen path (bench.py): the instrument cannot be edited during a campaign"}`; a worktree source edit → allowed; `session_start` → notify + the injected nudge with the live campaign line.
 - All eight `pi/prompts/*.md` frontmatter values are double-quoted and parse as strict YAML (omniplugin pitfall #18).
 
-**Not verified:** anything on a live pi — package discovery from `package.json`'s `pi` key, template expansion, the `tool_call` event name and its `{ block, reason }` return shape (taken from pi's documented extension API, not from a version-exact `.d.ts`; if the event does not exist the registration is a harmless no-op), the child-spawn transport, `pi update`. If you run pi, `pi install /path/to/researchloop` and an issue with what you see closes this gap for everyone.
+**Not verified:** anything on a live pi — package discovery from `package.json`'s `pi` key, template expansion, the `tool_call` event name and its `{ block, reason }` return shape (taken from pi's documented extension API, not from a version-exact `.d.ts`; if the event does not exist the registration is a harmless no-op), the child-spawn transport, `pi update`. If you run pi, `pi install /path/to/strictlybetter` and an issue with what you see closes this gap for everyone.

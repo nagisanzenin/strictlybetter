@@ -18,7 +18,7 @@ hooks/frozen-guard.sh, hooks/stop-driver.sh, skills/, agents/, scripts/sb.py   #
 **1 · Clone into the shared agent home** (`~/.agents` — dsh reads it natively):
 
 ```sh
-git clone https://github.com/nagisanzenin/researchloop ~/.agents/strictlybetter
+git clone https://github.com/nagisanzenin/strictlybetter ~/.agents/strictlybetter
 ```
 
 **2 · Link the eight skills into dsh's user skill root** (guarded: `ln -sfn` into an existing real directory silently nests the link one level deep, where dsh does not look — and `run`/`status`/`stop` are generic names in a shared namespace):
