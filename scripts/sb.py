@@ -133,8 +133,10 @@ def num(x, default: float = 0.0) -> float:
     """Coerce a stored number; corrupt values count as the default instead of crashing a report."""
     try:
         v = float(x)
-        return default if v != v else v  # NaN -> default
-    except (TypeError, ValueError):
+        if v != v or v in (math.inf, -math.inf):
+            return default  # NaN / inf -> default
+        return v
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -159,7 +161,7 @@ def append_jsonl(path: str, record: dict) -> None:
 def read_jsonl(path: str) -> list:
     out = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -168,7 +170,7 @@ def read_jsonl(path: str) -> list:
                     out.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue  # a torn line never bricks a read path
-    except FileNotFoundError:
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
         pass
     return out
 
@@ -389,7 +391,7 @@ class Home:
 
     # cards
     def card_path(self, mid: str) -> str:
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", mid or ""):
+        if not isinstance(mid, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", mid):
             raise SBError(f"bad metric id: {mid!r}")
         return os.path.join(self.metrics_dir, f"{mid}.json")
 
@@ -417,6 +419,8 @@ class Home:
         for k in ("goals", "guardrails", "diagnostics", "accepted_ids"):
             if not isinstance(c.get(k, []), list):
                 raise SBError(f"corrupt campaign.json: {k} is not a list")
+            if any(not isinstance(x, str) for x in c.get(k, [])):
+                raise SBError(f"corrupt campaign.json: {k} holds a non-string id")
         for k in ("walls", "spent", "budget", "holdout_override", "card_hashes", "external_hashes", "mde"):
             if c.get(k) is not None and not isinstance(c.get(k), dict):
                 raise SBError(f"corrupt campaign.json: {k} is not an object")
@@ -1192,11 +1196,13 @@ def bandit_mix(home: Home, batch: int, seed: int | None = None, priors: dict | N
     weights = {}
     for op in OPERATORS:
         rec = ops.get(op)
-        if rec:
-            a, be = rec.get("alpha", 1), rec.get("beta", 1)
+        if isinstance(rec, dict):
+            a, be = num(rec.get("alpha", 1), 1.0), num(rec.get("beta", 1), 1.0)
         else:
-            pr = (priors or {}).get(op) or DEFAULT_PRIORS.get(op, [1, 3])
-            a, be = pr[0], pr[1]
+            pr = (priors or {}).get(op) if isinstance(priors, dict) else None
+            if not (isinstance(pr, list) and len(pr) == 2):
+                pr = DEFAULT_PRIORS.get(op, [1, 3])
+            a, be = num(pr[0], 1.0), num(pr[1], 3.0)
         weights[op] = max(1e-6, rng.betavariate(max(0.01, a), max(0.01, be)))
     picks = rng.choices(list(weights.keys()), weights=list(weights.values()), k=batch)
     counts: dict = {}
@@ -2552,9 +2558,12 @@ def redact(rec: dict) -> dict:
     return r
 
 
-def redact_event(e: dict) -> dict:
-    if e.get("event") == "confirm" or (e.get("event") == "measure" and (e.get("data") or {}).get("fidelity") == "confirm"):
-        return {**e, "data": {k: v for k, v in (e.get("data") or {}).items() if k in ("verdict", "reason", "level", "commit", "fidelity", "rounds")} | {"redacted": "holdout numbers"}}
+def redact_event(e) -> dict:
+    if not isinstance(e, dict):
+        return {"corrupt": True, "raw": str(e)[:80]}
+    data = e.get("data") if isinstance(e.get("data"), dict) else {}
+    if e.get("event") == "confirm" or (e.get("event") == "measure" and data.get("fidelity") == "confirm"):
+        return {**e, "data": {k: v for k, v in data.items() if k in ("verdict", "reason", "level", "commit", "fidelity", "rounds")} | {"redacted": "holdout numbers"}}
     return e
 
 
