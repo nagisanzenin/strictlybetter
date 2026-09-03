@@ -67,7 +67,7 @@ session, or a previous turn's summary can all be stale; the ledger cannot.
 | `profile write\|show` | `--file P` | write requires `archetypes` (non-empty), `commands`, `purpose` |
 | `card add\|list\|validate\|show\|probe` | `[ID] --file P --repeats N` | `add` reads a card JSON; `probe` applies `degradation.apply` in a throwaway worktree (default 2 repeats); `validate` exits 1 on problems |
 | `baseline` | `--metric ID -k/--repeats N --levels screen,confirm` | default 5 repeats at `screen` and `confirm`; all cards when no campaign |
-| `campaign start\|show\|end\|halt\|resume` | `--file P --reason R --no-baseline --repeats N` | `start` refuses while one is running; `end` writes the report; `resume` clears STOP |
+| `campaign start\|show\|end\|halt\|resume` | `--file P --reason R --no-baseline --repeats N --allow-unusable` | `start` refuses while one is running or a goal's minimum detectable effect is unusable (`--allow-unusable` overrides, gate-1 decision); `end` writes the report; `resume` clears STOP |
 | `next` | `--json --seed N` | the brief; works on halted/ended campaigns too |
 | `prereg` | `--file P` | hypothesis JSON; prints `{id, worktree, base_commit, prereg_hash}` |
 | `submit ID` | | commits the worktree; prints `{ok, violations, …}`; exit 1 when not ok |
@@ -84,7 +84,7 @@ session, or a previous turn's summary can all be stale; the ledger cannot.
 | `budget` | | counters and what is exhausted |
 | `guard [PATH]` | `--stdin` | exit 2 = deny (used by the PreToolUse hook) |
 | `stop` | | writes the STOP file |
-| `ledger view ID \| tail -n N \| experiments` | | |
+| `ledger view ID \| tail -n N \| experiments` | `--unredacted` | `view` redacts discarded candidates' holdout numbers unless `--unredacted` (audit only) |
 | `inheritance write\|show` | `--file P` | body must contain `## ` sections |
 | `worktree new\|drop\|path\|list ID` | `--commit C` | `path` prints where an experiment's worktree is |
 | `session-start`, `doctor`, `selftest` | | |

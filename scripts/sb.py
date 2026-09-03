@@ -19,6 +19,7 @@ State home: <repo>/.strictlybetter (override with SB_HOME).
     sb submit <id>                    commit the worktree; integrity check
     sb measure <id> --fidelity screen measure goals + guardrails
     sb judge <id>                     statistical verdict on the screen numbers
+    sb judge-payload <id>             compose the blind judge's input file (diff, prereg, numbers, risks)
     sb judge-verdict <id> --file v.json  store the blind judge's verdict
     sb confirm <id>                   clean checkout + holdout + repeats
     sb accept <id> | sb discard <id> --reason R [--archive]
@@ -438,7 +439,7 @@ class Home:
             if ev == "prereg":
                 r.update({k: d.get(k) for k in ["campaign", "operator", "target", "hypothesis",
                                                  "predicted", "expected_diff_size", "mechanism",
-                                                 "prereg_hash", "worktree", "ts_start"]})
+                                                 "prereg_hash", "worktree", "base_commit", "ts_start"]})
                 r["ts_start"] = e.get("ts")
             elif ev == "submit":
                 r.update({k: d.get(k) for k in ["commit", "diff_hash", "diff_lines", "new_deps",
@@ -471,6 +472,15 @@ class Home:
 # ----------------------------------------------------------------------------
 # Cards
 # ----------------------------------------------------------------------------
+def strip_comments(obj):
+    """Drop `_comment*` keys (template annotations) recursively."""
+    if isinstance(obj, dict):
+        return {k: strip_comments(v) for k, v in obj.items() if not str(k).startswith("_comment")}
+    if isinstance(obj, list):
+        return [strip_comments(x) for x in obj]
+    return obj
+
+
 def validate_card(card: dict) -> None:
     if not isinstance(card, dict):
         raise SBError("card must be an object")
@@ -1051,6 +1061,7 @@ def load_payload(path: str) -> dict:
 def cmd_card(home: Home, args) -> int:
     if args.action == "add":
         card = load_payload(args.file)
+        card = strip_comments(card)
         validate_card(card)
         home.ensure()
         old = None
@@ -1536,6 +1547,34 @@ def cmd_judge(home: Home, args) -> int:
     return 0
 
 
+def cmd_judge_payload(home: Home, args) -> int:
+    """Compose the blind judge's payload: diff, pre-registration, screen comparisons, the affected
+    cards' gaming_risks, and the checklist path. No experimenter reasoning exists in it by construction."""
+    c = require_campaign(home, running=False)
+    eid = args.id
+    r = experiment_record(home, eid)
+    if not r.get("commit"):
+        raise SBError(f"{eid} has no submitted commit")
+    base = r.get("base_commit") or c["head_commit"]
+    diff = git(["diff", base, r["commit"]], home.repo)
+    cards = card_set(home, c)
+    risks = {mid: (cards[mid].get("gaming_risks") or []) for mid in list(c["goals"]) + list(c["guardrails"])}
+    js = r.get("judge_stat") or {}
+    comps = [{k: v for k, v in comp.items() if k in ("id", "kind", "direction", "value", "baseline", "delta", "sigma", "threshold", "improved", "regressed", "valid", "note")}
+             for comp in (js.get("comparisons") or [])]
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    checklist = os.path.join(root, "templates", "judge-checklist.md")
+    payload = {"experiment": eid, "campaign": c["id"], "prereg": {k: r.get(k) for k in ("operator", "target", "hypothesis", "predicted", "expected_diff_size", "mechanism", "prereg_hash")},
+               "diff": diff, "diff_lines": r.get("diff_lines"), "files": r.get("files"), "new_deps": r.get("new_deps"), "screen_comparisons": comps,
+               "anomaly": bool(js.get("anomaly")), "gaming_risks": risks, "frozen_paths": c.get("frozen_paths_effective"),
+               "checklist_path": checklist if os.path.exists(checklist) else None,
+               "verdict_schema": {"verdict": "clean|suspicious|gamed", "pattern": "string", "evidence": "string", "recommended_check": "string"}}
+    out = args.out or home.p("inbox", f"judge-{eid}.json")
+    write_json_atomic(out, payload)
+    print(out)
+    return 0
+
+
 def cmd_judge_verdict(home: Home, args) -> int:
     c = require_campaign(home)
     eid = args.id
@@ -1915,7 +1954,9 @@ def cmd_next(home: Home, args) -> int:
              "goals": c["goals"], "guardrails": c["guardrails"], "diagnostics": c["diagnostics"], "frozen_paths": c.get("frozen_paths_effective"),
              "protected_paths": protected_paths(home, c), "open_experiments": open_ids, "recent_dead_ends": dead, "accepted_so_far": wins,
              "archive_hints": archive, "inheritance": home.p("inheritance.md") if os.path.exists(home.p("inheritance.md")) else None,
-             "stop_requested": stop_requested(home), "screen_untrusted": bool(c.get("screen_untrusted")), "decision_hint": s.get("decision") if "decision" in s else None}
+             "stop_requested": stop_requested(home), "screen_untrusted": bool(c.get("screen_untrusted")), "decision_hint": s.get("decision") if "decision" in s else None,
+             "max_parallel": int(c.get("max_parallel", 2)), "distill_every": int(c.get("distill_every", 8)), "iteration_cap": int(c.get("iteration_cap", DEFAULT_ITERATION_CAP)),
+             "walls": c.get("walls"), "mde": c.get("mde")}
     if args.json:
         print(json.dumps(brief, indent=2))
         return 0
@@ -2359,6 +2400,12 @@ def selftest() -> int:
             cmd_judge(home, argparse.Namespace(id=e1, fidelity="screen"))
         r = home.experiments()[e1]
         check("judge promotes real improvement", r["judge_stat"]["verdict"] == "promote")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cmd_judge_payload(home, argparse.Namespace(id=e1, out=None))
+        jp = read_json(out.getvalue().strip())
+        check("judge payload has diff and no reasoning", "N = 20" in jp["diff"] and "reasoning" not in json.dumps(jp) and "hypothesis" in jp["prereg"])
+        check("strip_comments", strip_comments({"a": 1, "_comment": "x", "b": {"_comment_c": 1, "d": [{"_comment": 2, "e": 3}]}}) == {"a": 1, "b": {"d": [{"e": 3}]}})
         vp = os.path.join(td, "v.json")
         write_json_atomic(vp, {"verdict": "clean", "pattern": "", "evidence": "", "recommended_check": ""})
         with contextlib.redirect_stdout(io.StringIO()):
@@ -2486,6 +2533,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("submit"); sp.add_argument("id")
     sp = sub.add_parser("measure"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full", "confirm"], default="screen"); sp.add_argument("--repeats", type=int); sp.add_argument("--keep-runs", action="store_true")
     sp = sub.add_parser("judge"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full"], default="screen")
+    sp = sub.add_parser("judge-payload"); sp.add_argument("id"); sp.add_argument("--out")
     sp = sub.add_parser("judge-verdict"); sp.add_argument("id"); sp.add_argument("--file", default="-")
     sp = sub.add_parser("confirm"); sp.add_argument("id"); sp.add_argument("--force", action="store_true")
     sp = sub.add_parser("accept"); sp.add_argument("id"); sp.add_argument("--force", action="store_true")
@@ -2510,7 +2558,7 @@ def build_parser() -> argparse.ArgumentParser:
 HANDLERS = {
     "init": cmd_init, "profile": cmd_profile, "card": cmd_card, "baseline": cmd_baseline, "campaign": cmd_campaign,
     "next": cmd_next, "prereg": cmd_prereg, "submit": cmd_submit, "measure": cmd_measure, "judge": cmd_judge,
-    "judge-verdict": cmd_judge_verdict, "confirm": cmd_confirm, "accept": cmd_accept, "discard": cmd_discard, "cost": cmd_cost,
+    "judge-verdict": cmd_judge_verdict, "judge-payload": cmd_judge_payload, "confirm": cmd_confirm, "accept": cmd_accept, "discard": cmd_discard, "cost": cmd_cost,
     "distill-stats": cmd_distill_stats, "status": cmd_status, "report": cmd_report, "budget": cmd_budget, "guard": cmd_guard,
     "session-start": cmd_session_start, "doctor": cmd_doctor, "stop": cmd_stop, "ledger": cmd_ledger, "inheritance": cmd_inheritance,
     "worktree": cmd_worktree, "drive": cmd_drive,

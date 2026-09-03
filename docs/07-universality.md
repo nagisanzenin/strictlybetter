@@ -4,7 +4,7 @@ Universality is a property of the interface, not of the loop body. Anything that
 
 ## 7.1 Archetypes
 
-An archetype is a discovery prior: default metric cards, default protected paths, default operator priors, and known noise sources. A project can match more than one (a Rust service with a Python data pipeline). Archetypes live in `archetypes/*.yaml` in the plugin and are matched by the orienteer from build files and directory shape.
+An archetype is a discovery prior: default metric cards, default protected paths, default operator priors, and known noise sources. A project can match more than one (a Rust service with a Python data pipeline). Archetypes live in `archetypes/*.json` in the plugin, one file per row of the table below, with the fields `id`, `title`, `match` (file, directory, language, and dependency signals), `confidence_notes`, `commands`, `protected_paths`, `frozen_paths_hint`, `default_cards` (complete metric cards with `{{placeholders}}` for the metrologist to fill), `operator_priors`, `hygiene_guardrails`, `noise_sources`, and `notes`. The orienteer matches them from build files and directory shape; the engine never reads a pack directly, it sees only the cards the metrologist adds and the `archetype_priors` the campaign spec carries.
 
 | Archetype | Default goals (candidates) | Default guardrails | Known noise sources |
 |---|---|---|---|
@@ -39,6 +39,8 @@ A project with no tests, no benches, and no reference outputs has nothing the lo
 
 Instrument campaigns are also how brownfield projects add a metric they lack (for example, a service with tests but no latency measurement).
 
+Not in v1.0: an engine-level instrument mode that inverts the roles automatically, and the instrument-quality ratio as a computed metric. An instrument campaign is built by hand in v1.0: the campaign's `frozen_paths` and the cards' `integrity.frozen_paths` list the implementation, the test and bench paths are left unfrozen, and the goal is a card that counts what the instrument covers (the `python-package` pack ships `coverage_pct` as a diagnostic for exactly this).
+
 ## 7.4 Science projects
 
 A science project is a repo whose headline output is a number in a paper: an error rate, a convergence time, a fit quality, a reproduction of a published result. The loop treats it as any other archetype with three adjustments:
@@ -47,7 +49,7 @@ A science project is a repo whose headline output is a number in a paper: an err
 2. **Holdout is a slice of the problem space.** Confirmation runs use parameter settings, seeds, or datasets the experimenter never saw. A method that only works on the development case is discarded.
 3. **Pre-registration is stricter.** The predicted effect must include a mechanism ("reducing the tolerance should cut iterations because the residual is dominated by …"). The distiller carries these mechanisms forward; they become the project's growing understanding, not just its numbers.
 
-For ML training specifically, the loop follows the autoresearch shape (fixed budget per run, one headline metric) but adds the held-out test split as a confirm-only guardrail, the determinism check, and the noise floor from repeated seeds. Most "improvements" found by an unguarded loop on a five-minute training run are seed noise; the noise floor is what makes overnight runs trustworthy.
+For ML training specifically, the loop follows the autoresearch shape (fixed budget per run, one headline metric) but adds the held-out test split as a confirm-only guardrail (a card with `skip: true` at screen and full), the determinism check (an `equal` guardrail), and the noise floor from repeated seeds (an `env` holdout on the confirm level). Most "improvements" found by an unguarded loop on a five-minute training run are seed noise; the noise floor is what makes overnight runs trustworthy.
 
 ## 7.5 Non-code artifacts
 

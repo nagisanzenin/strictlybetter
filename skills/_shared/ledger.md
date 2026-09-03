@@ -66,7 +66,7 @@ prefix before the first `:` is in this list.
 ## Reading it
 
 ```bash
-$SB ledger view e0007          # one merged record
+$SB ledger view e0007          # one merged record (a discarded candidate's confirm numbers are redacted; --unredacted for audits)
 $SB ledger tail -n 30          # the last 30 raw events
 $SB ledger experiments         # one line per experiment: id, operator, target, verdict, reason, diff_lines
 ```

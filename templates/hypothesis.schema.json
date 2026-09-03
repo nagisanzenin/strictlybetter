@@ -2,39 +2,112 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/nagisanzenin/researchloop/templates/hypothesis.schema.json",
   "title": "strictlybetter pre-registered hypothesis",
-  "description": "docs/03 §HYPOTHESIZE plus `mechanism`. `sb prereg --file` validates this and writes the ledger line before any diff exists. The operator must be one of the 13 ids in operators/. Predicted effects are strings in the form <signed number>[..<signed number>][ unit] so the harness can compare them to confirmed effects.",
+  "description": "docs/03 \u00a7HYPOTHESIZE plus `mechanism`. `sb prereg --file` validates this and writes the ledger line before any diff exists. The operator must be one of the 13 ids in operators/. Predicted effects are strings in the form <signed number>[..<signed number>][ unit] so the harness can compare them to confirmed effects.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "operator", "target", "hypothesis", "mechanism", "predicted", "expected_diff_size", "est_cost_s"],
+  "required": [
+    "operator",
+    "target",
+    "hypothesis",
+    "mechanism",
+    "predicted",
+    "expected_diff_size"
+  ],
   "properties": {
-    "id": {"type": "string", "pattern": "^e[0-9]{4,}$"},
-    "operator": {"$ref": "#/definitions/operator"},
-    "target": {"type": "string", "minLength": 1, "maxLength": 300, "description": "A path, or path:symbol. A diff whose primary target differs is a new hypothesis."},
-    "hypothesis": {"type": "string", "minLength": 20, "maxLength": 1000},
-    "mechanism": {"type": "string", "minLength": 20, "maxLength": 2000, "description": "Why the change should move the metric, grounded in evidence. Required; science projects (docs/07 §7.4) are held to a higher bar by the distiller, not by this schema."},
+    "id": {
+      "type": "string",
+      "pattern": "^e[0-9]{4,}$"
+    },
+    "operator": {
+      "$ref": "#/definitions/operator"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "A path, or path:symbol. A diff whose primary target differs is a new hypothesis."
+    },
+    "hypothesis": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 1000
+    },
+    "mechanism": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 2000,
+      "description": "Why the change should move the metric, grounded in evidence. Required; science projects (docs/07 \u00a77.4) are held to a higher bar by the distiller, not by this schema."
+    },
     "predicted": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
-      "additionalProperties": {"$ref": "#/definitions/effect"},
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/effect"
+      },
       "description": "One entry per goal, plus every guardrail the change could plausibly move. Metric ids must exist in the campaign's set."
     },
-    "expected_diff_size": {"enum": ["tiny", "small", "medium", "large"]},
-    "est_cost_s": {"type": "number", "minimum": 0, "description": "Expected implementation plus screen-measurement wall-clock."},
-    "evidence": {"type": "string", "maxLength": 1000},
-    "archive_refs": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"}, "uniqueItems": true, "description": "Archive entries (by hash) the hypothesis recombines."},
+    "expected_diff_size": {
+      "enum": [
+        "tiny",
+        "small",
+        "medium",
+        "large"
+      ]
+    },
+    "est_cost_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Expected implementation plus screen-measurement wall-clock."
+    },
+    "evidence": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "archive_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{7,64}$"
+      },
+      "uniqueItems": true,
+      "description": "Archive entries (by hash) the hypothesis recombines."
+    },
     "enables": {
       "oneOf": [
-        {"type": "null"},
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["operator", "target", "hypothesis", "predicted"],
+          "required": [
+            "operator",
+            "target",
+            "hypothesis",
+            "predicted"
+          ],
           "properties": {
-            "operator": {"$ref": "#/definitions/operator"},
-            "target": {"type": "string", "minLength": 1},
-            "hypothesis": {"type": "string", "minLength": 10},
-            "predicted": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/definitions/effect"}}
+            "operator": {
+              "$ref": "#/definitions/operator"
+            },
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hypothesis": {
+              "type": "string",
+              "minLength": 10
+            },
+            "predicted": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/definitions/effect"
+              }
+            }
           }
         }
       ],
@@ -43,7 +116,21 @@
   },
   "definitions": {
     "operator": {
-      "enum": ["config", "algorithmic", "allocation", "caching", "concurrency", "dependency", "test-add", "bugfix", "refactor-enabling", "data", "model", "numerics", "docs"]
+      "enum": [
+        "config",
+        "algorithmic",
+        "allocation",
+        "caching",
+        "concurrency",
+        "dependency",
+        "test-add",
+        "bugfix",
+        "refactor-enabling",
+        "data",
+        "model",
+        "numerics",
+        "docs"
+      ]
     },
     "effect": {
       "type": "string",

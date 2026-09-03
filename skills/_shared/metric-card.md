@@ -56,18 +56,20 @@ into `metrics/`. Transcribed from `validate_card`, `fidelity_spec`, `measure_onc
 | `measure.parse` | yes | one of the three forms below |
 | `measure.cwd` | no | subdirectory of the checkout to run in (default `.`) |
 | `measure.timeout_s` | no | default 600; a timeout is an invalid run, never a number |
-| `measure.env` | no | extra environment; the engine adds `SB_FIDELITY`, `SB_METRIC`, and `PYTHONHASHSEED=0` unless you set it |
+| `measure.env` | no | extra environment; the engine adds `SB_FIDELITY`, `SB_METRIC`, `PYTHONDONTWRITEBYTECODE=1`, and `PYTHONHASHSEED=0` unless you set them |
 | `measure.expected_duration_s` | no | `[lo, hi]` validity band in seconds; a run outside it is invalid (a zero-second "win" is the Gomoku case, docs/01) |
 | `measure.allow_nonzero_exit` | no | default false: a non-zero exit is an invalid run. Set true only for instruments that report a count and exit non-zero by design |
-| `fidelity.<level>` | no | per-level overrides of any `measure` key plus `repeats`, `max_repeats`, `holdout`. Levels: `screen` (what experiments see; cheapest), `full` (run at confirm time when present), `confirm` (harness only, holdout, repeats). Defaults: `repeats` 1 (confirm: 3), `max_repeats` = repeats (confirm: 3) |
+| `fidelity.<level>` | no | per-level overrides of any `measure` key plus `repeats`, `max_repeats`, `holdout`, `skip`. Levels: `screen` (what experiments see; cheapest), `full` (run at confirm time when present), `confirm` (harness only, holdout, repeats). Defaults: `repeats` 1 (confirm: 3), `max_repeats` = repeats (confirm: 3). `skip: true` at `screen` and `full` makes a confirm-only metric (a held-out test split the experimenter never sees) |
 | `acceptance.kappa` | no | default 2.5; goal must move by more than `kappa_eff × sigma` |
 | `acceptance.tolerance_sigma` | no | default 1.0; as a guardrail, may not drop more than this many sigma. **Use `0` for deterministic guardrails** (test failures, lint counts, checksums): any drop regresses |
 | `integrity.frozen_paths` | no | paths hashed at campaign start and denied to the experimenter: the bench, the tests, fixtures, eval scripts, reference outputs. Patterns: `dir/` prefix, glob (`*.pem`), or exact path |
 | `degradation.apply` | for probe | a shell recipe, run in a throwaway worktree, that must make the metric **worse by more than sigma**. Anchor it (assert the target text exists) so a stale recipe fails loudly instead of silently doing nothing. `card probe` refuses a card without it |
 | `gaming_risks` | yes in spirit | strings handed to the blind judge; `card validate` flags an empty list. Name the cheap tricks that would move *this* number without improving the property |
 | `contention_safe` | no | `true`: may run concurrently with other measurements (counts, checksums). `false` (default): timing-sensitive, the engine serializes it behind `measure.lock` |
+| `reuse_output` | no | `true`: this card re-parses another card's identical command (a checksum printed next to a timing) and reuses that run's output instead of paying for the command twice |
 | `hygiene` | no | `true`: the engine adds this guardrail to **every** campaign whether or not the user listed it (build passes, tests pass, lint clean). Set it on the archetype pack's `hygiene_guardrails` |
 | `noise` | engine | written by `sb baseline`: `{sigma, samples, method, measured_at, environment_fingerprint}`. Author it as `null`; a hand-written sigma is a lie the engine will overwrite |
+| `title`, `cost` | ignored | not read by the engine; cost is measured (`secs_per_run` per level in `baseline.json`) |
 | `probe` | engine | written by `card probe`: `{monotonic, detail, at, commit}` |
 
 ## `parse` forms
@@ -89,6 +91,8 @@ After every 10 acceptances the engine rotates `env`/`arg` holdout values and re-
 ## Validity (what makes a run a number)
 
 A run is **invalid**, and never compared, when: the command times out; it exits non-zero and `allow_nonzero_exit` is false; the parse finds nothing; the duration is outside `expected_duration_s`; or, for `direction: equal`, repeats disagree. A goal or guardrail with an invalid run discards the experiment as `invalid`. A card whose baseline is invalid quarantines the metric and the campaign will not start on it.
+
+**Usability gate.** At `campaign start` the engine computes each goal's minimum detectable effect from its measured sigma and confirm repeats and prints it. A goal that cannot detect an effect smaller than 50% on this host is unusable (`instrument-unusable:<metric>`) and the campaign halts; `--allow-unusable` is a gate-1 human override. A screen fidelity with a cheaper command and more `confirm.repeats` is how a noisy metric earns its way back.
 
 ## Card quality rules for the metrologist
 

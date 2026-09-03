@@ -22,18 +22,18 @@ A hypothesis belongs to exactly one **operator class**. Classes are the arms of 
 | `numerics` | precision, solver, tolerance, stability | small | science and simulation |
 | `docs` | documentation coverage | small | docs goals only |
 
-Two properties are attached to every class: an **expected diff size** (which sets the complexity regularizer's κ) and a **model tier** for implementation (`05-cost-and-speed.md`).
+Two properties are attached to every class in `operators/*.md`: an **expected diff size** (what `sb next` allows per exploration level; the complexity regularizer itself uses the submitted diff's actual line count) and a **model tier** for implementation (`05-cost-and-speed.md`). The engine's `OPERATORS` list is exactly these thirteen ids; `sb prereg` rejects any other.
 
 ## 6.2 Choosing moves: a bandit with priors
 
-Each operator class keeps, per repo, in `bandit.json`: attempts, acceptances, mean confirmed effect size, mean cost. Selection is Thompson sampling on a Beta posterior over acceptance probability, weighted by mean effect per dollar. Cold start uses archetype priors (for a Rust crate: `allocation` and `algorithmic` start warm; `docs` starts cold unless a docs metric is a goal).
+Each operator class keeps, per repo, in `bandit.json`: `alpha`, `beta`, `attempts`, `accepts`, `effect_sum` (confirmed relative effects), `cost_s`. `sb accept` and `sb discard` update it. Selection in `sb next` is Thompson sampling on the Beta(`alpha`, `beta`) posterior over acceptance probability, one draw per class, then a weighted draw of the batch. Not in v1.0: weighting by mean effect per dollar; effect and cost are recorded for the distiller but do not enter the draw. Cold start uses archetype priors (for a Rust crate: `allocation` and `algorithmic` start warm; `docs` starts cold unless a docs metric is a goal): the campaign spec's `archetype_priors`, copied from the archetype pack's `operator_priors`, or the engine's defaults.
 
 The bandit chooses the *mix* of a hypothesis batch, not individual hypotheses. The experimenter agent still writes the hypotheses; the bandit tells it "four algorithmic, one caching, one config this round". This keeps the LLM in charge of content and the harness in charge of allocation.
 
 Hypothesis quality inputs, in priority order:
 
-1. **Diagnostics from the current best state**: profiler output, flame graphs, slowest tests, coverage gaps, failing cases, compiler warnings, largest functions. The harness collects these once per accepted state so hypotheses are grounded in evidence, not guesswork.
-2. **Ablation probes** (MLE-STAR style): cheap experiments that disable or stub a component to measure how much of the metric it accounts for. Run at most a few per campaign; they tell the loop where the leverage is.
+1. **Diagnostics from the current best state**: profiler output, flame graphs, slowest tests, coverage gaps, failing cases, compiler warnings, largest functions. Collected once per accepted state so hypotheses are grounded in evidence, not guesswork. In v1.0 the experimenter or orchestrator collects them; the engine's `sb next` brief carries the frontier, dead ends, wins, and archive hints, not diagnostics.
+2. **Ablation probes** (MLE-STAR style): cheap experiments that disable or stub a component to measure how much of the metric it accounts for. Run at most a few per campaign; they tell the loop where the leverage is. In v1.0 these are ordinary pre-registered experiments the experimenter chooses to run.
 3. **The inheritance body**: what worked, what is a dead end.
 4. **The archive**: partial or near-miss diffs that could be recombined.
 
@@ -42,10 +42,10 @@ Hypothesis quality inputs, in priority order:
 Smaller diffs are cheaper to judge, less likely to hide gaming, and less likely to break guardrails. The loop prefers them and makes larger ones earn their keep:
 
 ```
-kappa_effective = kappa × (1 + λ · log(1 + diff_lines / 50))     λ = 0.3 default
+kappa_effective = kappa × (1 + λ · ln(1 + diff_lines / 50)) + 1.0 × new_deps     λ = 0.3
 ```
 
-A 40-line diff must beat 2.5σ; a 400-line diff must beat about 3.4σ. New dependencies add a fixed penalty. The regularizer is the loop's version of a prior toward simple explanations and is what stops "rewrite everything" hypotheses from being accepted on a lucky run.
+A one-line diff must beat 2.5σ; a 40-line diff about 2.9σ; a 400-line diff about 4.2σ. Each touched dependency manifest adds one sigma (and only the `dependency` operator may touch one). The regularizer is the loop's version of a prior toward simple explanations and is what stops "rewrite everything" hypotheses from being accepted on a lucky run.
 
 Step size is scheduled inversely to progress: after an acceptance, expected diff size resets to small; during a plateau it is allowed to grow (`§6.4`). This is a learning-rate schedule with the sign flipped: when the landscape is flat locally, take bigger steps.
 
@@ -60,9 +60,13 @@ A plateau is `patience` consecutive experiments without an acceptance (default 8
 | 2 | `refactor-enabling` operator unlocked on a **side branch** (stepping stones, §6.5); hypotheses may target components ablation showed matter but the loop has not touched |
 | 3 | campaign-level decision: switch metric set or stop (`03-loop.md` §DISTILL) |
 
-Any acceptance resets to level 0. Exploration levels are logged so the inheritance body can say "this metric saturated at level 2 after 31 experiments".
+Any acceptance resets to level 0. Exploration levels are logged (an `explore` event in the ledger) so the inheritance body can say "this metric saturated at level 2 after 31 experiments".
+
+In v1.0 the engine implements the levels as follows. `sb discard` raises the level after `plateau_patience` discards since the last acceptance (up to 3) and resets the counter; `sb next` widens the allowed diff sizes (level 0: tiny, small; level 1: adds medium; level 2 and above: adds large) and prints the level; `sb judge` arms the anomaly breaker once half a patience has passed without an acceptance; `sb distill-stats` returns `explore:levelN` while the level is above 0 and `stop:converged` after a further `patience` discards at level 3. Not in v1.0: a raised bandit temperature at level 1, engine-run ablation probes, and the side branch at level 2 (§6.5); `refactor-enabling` is always a legal operator, and at level 2 the experimenter is expected to use it for stepping stones that still pass the acceptance rule on the campaign branch. The bandit draw is the same at every level.
 
 ## 6.5 Stepping stones: annealing on a side branch, never on main
+
+Design; not in v1.0. The engine has one branch per campaign and no side-branch budget or merge-back; what follows is the intended mechanism for a later version.
 
 Hill climbing with a strict-improvement rule cannot cross a valley: a refactor that makes nothing faster but makes the next optimization possible is always discarded. Simulated annealing solves this by sometimes accepting worse moves, but accepting worse on the campaign branch would violate the ratchet.
 
@@ -74,21 +78,21 @@ This keeps the invariant: the campaign branch only ever fast-forwards to strictl
 
 Evolutionary program search (AlphaEvolve, ShinkaEvolve) keeps an archive of diverse solutions rather than a single best, because recombination of near-misses is where many of their wins come from. The loop keeps a light version:
 
-- Discards marked interesting are stored in `archive/` keyed by `(operator, target file, effect signature)`.
-- At most one entry per key is kept (the best by screen effect), which is MAP-Elites with a two-dimensional behaviour space.
-- The experimenter receives up to three archive entries relevant to its target when hypothesizing.
+- Discards marked interesting (`sb discard --archive`) are stored as `archive/<id>.diff`; the ledger's `discard` event records `archive_key` as `operator|target`.
+- At most one entry per key is kept (the best by screen effect), which is MAP-Elites with a two-dimensional behaviour space. Not in v1.0: the engine keeps one file per archived experiment and does not dedupe by key; the distiller prunes.
+- The experimenter receives archive hints when hypothesizing: `sb next` lists the six most recent archive files. Not in v1.0: selection by relevance to the target.
 
-The archive is local and never committed; the ledger references entries by hash.
+The archive is local and never committed (the state home's `.gitignore` excludes it); the ledger references entries by experiment id.
 
 ## 6.7 Stopping
 
 The loop stops, in order of precedence:
 
-1. `STOP` file present, integrity violation, or three consecutive harness errors: **halted**, needs a human.
-2. Budget exhausted in any dimension (dollars, hours, experiments): **budget**.
-3. Exploration level 3 reached and no other metric set has headroom: **converged**.
+1. `STOP` file present (`sb stop`; no new pre-registrations), two consecutive integrity violations, two consecutive `gamed` verdicts, a holdout-gap ratio above 0.75, or `sb campaign halt`: **halted**, needs a human (`sb campaign resume`). Not in v1.0: the three-consecutive-harness-errors halt; the constant is reserved and the counter is never incremented.
+2. Budget exhausted in any dimension (dollars, hours, experiments) or the iteration cap (200) reached: **budget**; `sb prereg` and `sb distill-stats` halt the campaign with `budget:<dimension>`.
+3. Exploration level 3 reached and a further `patience` experiments without acceptance: **converged**; `sb distill-stats` ends the campaign.
 
-"Headroom" for an inactive metric set is estimated from its last campaign's plateau level and the time since; a set that saturated long ago and whose code has since changed is considered to have headroom again.
+"Headroom" for an inactive metric set is estimated from its last campaign's plateau level and the time since; a set that saturated long ago and whose code has since changed is considered to have headroom again. Not in v1.0: the engine does not estimate headroom or switch sets; the distiller and the human decide what the next campaign optimizes.
 
 ## 6.8 What the loop does not do
 

@@ -49,7 +49,8 @@ Record the tier with `$SB cost <id> --wall-s <s> --tier <low|medium|high>`.
 
 > Implement the strictlybetter experiment in `<repo>/.strictlybetter/inbox/task-e0007.json`. Edit only inside the worktree it names; do not run the benchmark yourself more than twice; return `DONE e0007` or `BLOCKED: <reason>`.
 
-`task-<id>.json` (written by the orchestrator, never by hand-typing the diff):
+`task-<id>.json` (written by the orchestrator, never by hand-typing the diff; `commands`
+values are the profile's strings or null):
 
 ```json
 {"id": "e0007", "worktree": "<abs path>", "hypothesis": "<abs path to hyp json>",
