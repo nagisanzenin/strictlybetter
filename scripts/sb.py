@@ -247,9 +247,11 @@ def match_path(rel: str, pattern: str) -> bool:
     return rel == pattern or rel.startswith(pattern + "/")
 
 
-def matches_any(rel: str, patterns: list) -> str | None:
-    for p in patterns or []:
-        if match_path(rel, p):
+def matches_any(rel: str, patterns) -> str | None:
+    if not isinstance(patterns, (list, tuple)):
+        return None
+    for p in patterns:
+        if isinstance(p, str) and match_path(rel, p):
             return p
     return None
 
@@ -499,7 +501,8 @@ class Home:
                 r.update({k: d.get(k) for k in ["commit", "diff_hash", "diff_lines", "new_deps",
                                                  "files", "integrity_ok", "integrity_violations"]})
             elif ev == "measure":
-                r.setdefault("measures", {})[d.get("fidelity")] = d.get("results")
+                if isinstance(d.get("fidelity"), str) and isinstance(d.get("results"), dict):
+                    r.setdefault("measures", {})[d["fidelity"]] = d["results"]
             elif ev == "judge":
                 r["judge_stat"] = d
             elif ev == "verdict":
