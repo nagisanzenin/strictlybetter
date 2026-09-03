@@ -17,7 +17,7 @@
     "env": {},
     "_comment_env": "Pinned environment for the measurement process. Seeds, thread counts, hash seeds and budgets live here, never inside the code under test.",
     "expected_duration_s": [0.5, 600],
-    "_comment_expected_duration_s": "Validity band. A run outside it is `discard: invalid`, never a candidate. Tight bands catch zero-second training runs and benchmarks that finish before warm-up."
+    "_comment_expected_duration_s": "Validity band. A run outside it is `discard: invalid`, never a candidate. lo = the instrument's fixed cost (process start + input generation), never a fraction of the baseline, so a genuine 25x win is still a valid run; hi about 5x the baseline duration. Tight lower bounds catch zero-second training runs."
   },
   "fidelity": {
     "_comment": "Each level overrides only what differs from `measure` (command, env, expected_duration_s, repeats). screen is what experiments see; full re-measures promoted candidates; confirm is run by the harness from a clean checkout with holdout inputs and decides acceptance. A level with {\"skip\": true} is not measured at that fidelity (confirm-only guardrails such as a held-out test split).",

@@ -73,7 +73,7 @@ guard denied a frozen edit there. **No platform has that yet, Claude Code includ
 
 | Platform | Verified | Not verified |
 |---|---|---|
-| Claude Code | hook scripts from the shell against a pyfix campaign (nudge, JSON switch, guard deny/allow, Stop block, pins); selftest 61/61 | a release-tree cycle in a live session |
+| Claude Code | hook scripts from the shell against a pyfix campaign (nudge, JSON switch, guard deny/allow, Stop block, pins); selftest 61/61 at 1.0.0, 88/88 at 1.1.1; **1.1.0 live run** from the marketplace cache: orient → metrics → gate 1 → 3 experiments, 1 accepted with provenance, re-validated genuine (`docs/user-sessions/v1.1.0-live-run.md`) | registered `strictlybetter:sb-*` agent types and the hooks firing inside the same live session (the plugin was installed mid-session; general agents read the agent files instead) |
 | Codex | codex-cli 0.149.0-alpha.4.3 (ChatGPT-bundled), scratch `CODEX_HOME`: marketplace add, plugin list, plugin add → 1.0.0, whole-repo cache, selftest from the cache; TOML bodies byte-equal; binary carries the four hook events and exports `CLAUDE_PLUGIN_ROOT` | a live session, hooks firing, `$name` invocation |
 | OpenCode | 1.18.23 live: plugin route (8 skills, 7 agents, 8 commands bridged; `sb-judge` read-only) and `skills.paths` route (8 skills); 17 adapter checks; guard/nudge/pins through the adapter against a campaign | OpenCode 2.0 (not installed); a model session; npm publish |
 | Hermes | v0.18.2 live, scratch `HERMES_HOME`: 8 skills discovered; `hermes hooks test pre_llm_call` → `{"context": …}` then `{}`; 9-case failure battery | consent flow, a session, slash collision handling, `delegate_task` |

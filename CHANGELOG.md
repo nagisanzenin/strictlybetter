@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.1.1 — 2026-09-03 · what the first live run caught
+
+The first end-to-end run of the front-door skill on a fresh pyfix copy, with the plugin installed
+from the marketplace cache (`docs/user-sessions/v1.1.0-live-run.md`). One commit accepted and
+re-validated externally as genuine; three defects found, two fixed here, one left open.
+
+### Fixed
+- `sb status --json` reported `"profile": true` on a fresh repo (the 1.1.0 read-path hardening
+  returned a non-empty dict for a missing file); the front door would have skipped orient. `profile()`
+  now returns `{}` when the file is missing; selftest check "fresh repo has no profile".
+- The timer-divergence validity check compared ratios of instrument time to process wall-clock, so a
+  benchmark with fixed setup cost (input generation, interpreter start) would flag a genuine large
+  speedup as tampering once the timed work became a small share of the process. It now compares
+  absolute savings: checkable only when the claimed saving is at least 10% of the process
+  wall-clock, and then the wall-clock must drop by at least 25% of the claim
+  (`WALL_DIVERGENCE_MIN_SHARE`, `WALL_DIVERGENCE_MIN_FRACTION`). Three selftest checks.
+- Diagnostics measured at confirm now refresh their baseline value on accept, so the brief's
+  frontier stops showing stale diagnostic numbers after a win.
+- Metrologist guidance: `expected_duration_s` lower bound is the instrument's fixed cost, never a
+  fraction of the baseline. In the live run the genuine `word_freq` fix (screen 20.1→4.9 ms, judge
+  clean) was discarded as `invalid` at full fidelity because the whole bench finished in 0.178 s,
+  under the card's 0.3 s floor set from the baseline's duration. Cards are frozen for a campaign,
+  so the only recovery was `campaign end`. (`agents/sb-metrologist.md`, `skills/_shared/metric-card.md`,
+  `templates/card.json.tmpl`.)
+
+### Open
+- The bandit proposed `concurrency` for a single-threaded pure-Python microbench and the run skill
+  gives the orchestrator no way to decline an operator; it cost one experiment (discarded as noise).
+  A logged operator swap with a stated reason is the intended fix; not in 1.1.1.
+
+Gates run for this release: selftest 88/88; unittest 62 OK; the live run above (3 experiments, 1
+accepted; `bench --mode analyze` re-validation: genuine, process wall 1.003→0.489 s on fresh seeds,
+outputs match, tests pass). Mutation and fuzz gates unchanged from 1.1.0 (the diff touches no read
+path they cover beyond `profile()`, which the selftest now checks). Persona gate struck (§5.6).
+Benchmark: unchanged from 1.1.0 (no wall or constant changed except the divergence rule, which the
+gaming matrix exercises: G6-timer stays caught by validity or judge in every configuration).
+
 ## 1.1.0 — 2026-09-03 · multi-repo, monorepo scope, services, paired confirmation
 
 The unit of a campaign stays one repository. This release fits that unit to the layouts real

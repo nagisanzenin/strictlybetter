@@ -37,8 +37,11 @@ metric into the output directory and return one line.
 4. **Dry-run every command once** from a clean copy, not the repo: `git -C <repo> worktree
    add --detach <tmp> HEAD` (under `/tmp` or the inbox), run the command there with the
    card's `env`, confirm the parse finds a value, note the seconds, then
-   `git -C <repo> worktree remove --force <tmp>`. Set `expected_duration_s` to a band around
-   what you saw ([0.2×, 5×]). A command that does not produce a parsable value is not a card.
+   `git -C <repo> worktree remove --force <tmp>`. Set `expected_duration_s` with the LOWER bound equal to the
+   instrument's fixed cost (process start plus input generation, measured with the timed work
+   stubbed out or at the smallest size), never a fraction of the baseline: a genuine 10× or 25×
+   win finishes far below the baseline's duration and must still be a valid run. The upper bound
+   is about 5× what you saw. A command that does not produce a parsable value is not a card.
 5. **Frozen paths.** Every file the command depends on to mean something (the bench script,
    the tests, fixtures, reference outputs, eval configs) goes in `integrity.frozen_paths`.
    Use the profile's `frozen_paths` and what you saw the command read.

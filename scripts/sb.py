@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # ----------------------------------------------------------------------------
 # Constants (fixed before data; see docs/04 and docs/06). Do not tune to results.
@@ -80,8 +80,8 @@ TIME_UNITS = {"ms", "s", "sec", "secs", "seconds", "ns", "us", "µs", "minutes",
 MAD_MIN_N = 4               # robust sigma (1.4826 * MAD) needs at least this many repeats
 MAD_SCALE = 1.4826
 MAX_MDE = 0.5               # a goal whose minimum detectable effect exceeds 50% is unusable on this host
-WALL_DIVERGENCE_INSTR = 0.5   # instrument claims at least 2x faster ...
-WALL_DIVERGENCE_WALL = 0.9    # ... while the process wall-clock barely moved
+WALL_DIVERGENCE_MIN_SHARE = 0.10     # the claimed saving must be >= 10% of the process wall-clock to be checkable ...
+WALL_DIVERGENCE_MIN_FRACTION = 0.25  # ... and then the wall-clock must drop by >= 25% of the claimed saving
 
 OPERATORS = ["config", "algorithmic", "allocation", "caching", "concurrency",
              "dependency", "test-add", "bugfix", "refactor-enabling", "data",
@@ -461,6 +461,8 @@ class Home:
 
     def profile(self) -> dict:
         p = read_json(self.profile_path, default={}, expect=dict)
+        if not p:
+            return {}
         if p.get("commands") is not None and not isinstance(p.get("commands"), dict):
             p["commands"] = {}
         if p.get("protected_paths") is not None and not isinstance(p.get("protected_paths"), list):
@@ -1763,15 +1765,25 @@ def timer_divergence(card: dict, base: dict | None, meas: dict, comp: dict) -> s
     if not (comp.get("valid") and base and card.get("direction") == "minimize"
             and str(card.get("unit", "")).lower() in TIME_UNITS and comp.get("improved")):
         return None
+    unit = str(card.get("unit", "")).lower()
+    to_s = {"ms": 1e-3, "s": 1.0, "sec": 1.0, "secs": 1.0, "seconds": 1.0, "us": 1e-6, "µs": 1e-6, "ns": 1e-9, "minutes": 60.0, "min": 60.0}.get(unit)
+    if to_s is None:
+        return None
     try:
-        instr_ratio = float(meas["median"]) / float(base["median"]) if float(base["median"]) > 0 else None
+        instr_saved = (float(base["median"]) - float(meas["median"])) * to_s          # seconds the instrument says were saved
         wall_new = float(meas.get("secs_total", 0)) / max(1, int(meas.get("n", 1)))
         wall_base = float(base.get("secs_per_run") or 0)
-        wall_ratio = (wall_new / wall_base) if wall_base > 0 else None
+        wall_saved = wall_base - wall_new
     except (TypeError, ValueError):
         return None
-    if instr_ratio is not None and wall_ratio is not None and instr_ratio < WALL_DIVERGENCE_INSTR and wall_ratio > WALL_DIVERGENCE_WALL:
-        return f"instrument claims {instr_ratio:.2f}x of baseline but process wall-clock is {wall_ratio:.2f}x (timer or instrument tampering?)"
+    if wall_base <= 0 or instr_saved <= 0:
+        return None
+    # Only when the claimed saving is a visible share of the process wall-clock can the wall-clock
+    # confirm or deny it (a bench with 2 s of fixed setup cannot show a 5 ms saving). Then the
+    # process must have got faster by at least a quarter of what the instrument claims.
+    if instr_saved >= WALL_DIVERGENCE_MIN_SHARE * wall_base and wall_saved < WALL_DIVERGENCE_MIN_FRACTION * instr_saved:
+        return (f"instrument claims {instr_saved:.3f}s saved per run but process wall-clock changed by {wall_saved:+.3f}s "
+                f"(base {wall_base:.3f}s): timer or instrument tampering?")
     return None
 
 
@@ -2093,6 +2105,12 @@ def cmd_accept(home: Home, args) -> int:
             lv["confirm"]["secs_per_run"] = round(float(res["secs_total"]) / max(1, int(res["n"])), 3)
         if mid in c["goals"]:
             ratchet[mid] = {"best": e["best"], "sigma": e.get("sigma"), "commit": new_commit, "campaign": c["id"], "direction": comp["direction"]}
+    for mid, res in (conf.get("results") or {}).items():
+        if mid in c.get("diagnostics", []) and isinstance(res, dict) and res.get("valid") and res.get("median") is not None:
+            e = b.setdefault(mid, {"levels": {}})
+            e.setdefault("levels", {}).setdefault("confirm", {})["median"] = res["median"]
+            e["best"] = res["median"]
+            e["commit"] = new_commit
     # screen-level baseline follows the accepted commit's screen numbers (goals only; floors never drift)
     scr = (r.get("measures") or {}).get("screen") or {}
     for mid, s in scr.items():
@@ -2722,10 +2740,14 @@ def selftest() -> int:
     check("gap ratio", gap_ratio(0.10, 0.05) == 0.5 and gap_ratio(None, 0.1) is None)
     tcard = {"id": "t", "kind": "goal", "direction": "minimize", "unit": "ms"}
     tbase = {"median": 100.0, "sigma": 1.0, "n": 5, "secs_per_run": 2.0}
-    tmeas = {"valid": True, "median": 10.0, "secs_total": 6.0, "n": 3}   # claims 10x faster, wall-clock unchanged
+    tbase = {"median": 400.0, "sigma": 1.0, "n": 5, "secs_per_run": 0.5}   # 400 ms measured inside a 0.5 s process
+    tmeas = {"valid": True, "median": 1.0, "secs_total": 1.5, "n": 3}       # claims 399 ms saved, process still 0.5 s
     tcomp = compare_metric(tcard, tbase, tmeas, 2.5, 1.0, walls)
     check("timer divergence flags a lying instrument", timer_divergence(tcard, tbase, tmeas, tcomp) is not None)
-    check("timer divergence passes a real speedup", timer_divergence(tcard, tbase, {"valid": True, "median": 10.0, "secs_total": 0.6, "n": 3}, tcomp) is None)
+    check("timer divergence passes a real speedup", timer_divergence(tcard, tbase, {"valid": True, "median": 1.0, "secs_total": 0.33, "n": 3}, tcomp) is None)
+    obase = {"median": 130.0, "sigma": 1.0, "n": 5, "secs_per_run": 1.9}    # 130 ms of work inside 1.9 s of fixed setup
+    ocomp = compare_metric(tcard, obase, {"valid": True, "median": 15.0, "secs_total": 5.6, "n": 3}, 2.5, 1.0, walls)
+    check("timer divergence ignores savings hidden by fixed overhead", timer_divergence(tcard, obase, {"valid": True, "median": 15.0, "secs_total": 5.6, "n": 3}, ocomp) is None)
     # end-to-end on a temp git repo with a fake metric
     with tempfile.TemporaryDirectory() as td:
         repo = os.path.join(td, "repo")
@@ -2733,6 +2755,7 @@ def selftest() -> int:
         git(["init", "-q", "-b", "main"], repo)
         git(["config", "user.email", "t@t"], repo)
         git(["config", "user.name", "t"], repo)
+        check("fresh repo has no profile", not Home(repo=repo, home=os.path.join(repo, ".strictlybetter")).profile())
         with open(os.path.join(repo, "work.py"), "w") as f:
             f.write("N = 40\n")
         with open(os.path.join(repo, "bench.py"), "w") as f:

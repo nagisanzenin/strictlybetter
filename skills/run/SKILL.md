@@ -36,7 +36,7 @@ SB_ROOT="${SB_PY%/scripts/sb.py}"
 SB_REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 sb() { python3 "$SB_PY" --repo "$SB_REPO" "$@"; }   # a FUNCTION, not a string: zsh does not
 SB=sb                                                 # word-split "$SB"; both shells run `sb`
-$SB --version   # must print `sb 1.1.0`; anything else means this block did not run
+$SB --version   # must print `sb 1.1.1`; anything else means this block did not run
 ```
 
 ## 0 · Re-anchor (never trust conversational memory)

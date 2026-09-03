@@ -57,7 +57,7 @@ into `metrics/`. Transcribed from `validate_card`, `fidelity_spec`, `measure_onc
 | `measure.cwd` | no | subdirectory of the checkout to run in (default `.`) |
 | `measure.timeout_s` | no | default 600; a timeout is an invalid run, never a number |
 | `measure.env` | no | extra environment; the engine adds `SB_FIDELITY`, `SB_METRIC`, `PYTHONDONTWRITEBYTECODE=1`, and `PYTHONHASHSEED=0` unless you set them |
-| `measure.expected_duration_s` | no | `[lo, hi]` validity band in seconds; a run outside it is invalid (a zero-second "win" is the Gomoku case, docs/01) |
+| `measure.expected_duration_s` | no | `[lo, hi]` validity band in seconds; a run outside it is invalid (a zero-second "win" is the Gomoku case, docs/01). `lo` is the instrument's fixed cost (startup plus input generation), never a fraction of the baseline: a real 25× speedup must still be a valid run. |
 | `measure.allow_nonzero_exit` | no | default false: a non-zero exit is an invalid run. Set true only for instruments that report a count and exit non-zero by design |
 | `fidelity.<level>` | no | per-level overrides of any `measure` key plus `repeats`, `max_repeats`, `holdout`, `skip`. Levels: `screen` (what experiments see; cheapest), `full` (run at confirm time when present), `confirm` (harness only, holdout, repeats). Defaults: `repeats` 1 (confirm: 3), `max_repeats` = repeats (confirm: 3). `skip: true` at `screen` and `full` makes a confirm-only metric (a held-out test split the experimenter never sees) |
 | `acceptance.kappa` | no | default 2.5; goal must move by more than `kappa_eff × sigma` |

@@ -1,0 +1,168 @@
+{
+  "conditions": [
+    {
+      "accepted": 1,
+      "baseline_s": null,
+      "campaign": "2026-09-03-pyfix-try",
+      "condition": "2026-09-03-pyfix-try",
+      "engine_measurement_s": 586.6,
+      "experiments": 3,
+      "experiments_detail": [
+        {
+          "confirm_effect": 0.5288717348870333,
+          "hypothesis": "pairs_with_sum scans every pair of positions (O(n^2)); caching the value counts in one dict pass and",
+          "judge": "clean",
+          "kind": "caching",
+          "name": "e0001",
+          "outcome": "accept",
+          "reason": "confirmed",
+          "screen_effect": 0.7065611749792369,
+          "secs": 195.0,
+          "wall": ""
+        },
+        {
+          "confirm_effect": null,
+          "hypothesis": "word_freq rescans the whole word list once per distinct word; splitting the word list into chunks co",
+          "judge": null,
+          "kind": "concurrency",
+          "name": "e0002",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.15288743234520089,
+          "secs": 242.0,
+          "wall": ""
+        },
+        {
+          "confirm_effect": null,
+          "hypothesis": "word_freq calls words.count(word) once per distinct word, a full rescan each time (O(n*k)); a single",
+          "judge": "clean",
+          "kind": "algorithmic",
+          "name": "e0003",
+          "outcome": "discard",
+          "reason": "invalid",
+          "screen_effect": 0.7551516957147822,
+          "secs": 121.0,
+          "wall": ""
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 0,
+      "loop_s": 586.6,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/sb-try",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 0.9584053329890594,
+        "end_to_end": {
+          "base_wall_s": 1.0159,
+          "head_wall_s": 0.4856,
+          "outputs_match_base": true,
+          "speedup_pct": 52.2,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.0733741200879158,
+        "load_avg": [
+          8.947265625,
+          6.923828125,
+          6.21923828125
+        ],
+        "per_accept": [
+          {
+            "commit": "1a5c25e5f3",
+            "commit_wall_s": 0.4886,
+            "delta_s": 0.5142,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0001",
+            "instrument_ms": 159.523,
+            "kind": "caching",
+            "load_avg": [
+              8.46337890625,
+              7.0634765625,
+              6.29931640625
+            ],
+            "name": "e0001",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.4821,
+              0.5219,
+              0.5142
+            ],
+            "parent_wall_s": 1.0028,
+            "sigma_parent_s": 0.0768,
+            "tests_pass": true,
+            "threshold_s": 0.1567
+          }
+        ],
+        "rounds": 3
+      },
+      "stats": {
+        "accepted": 1,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 1
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "caching": {
+            "accepts": 1,
+            "attempts": 1
+          },
+          "concurrency": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "2026-09-03-pyfix-try",
+        "confirmed_effects": [
+          0.5288717348870333
+        ],
+        "discard_reasons": {
+          "invalid": 1,
+          "noise": 1
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 3,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.5,
+        "false_promotions": 1,
+        "holdout_gap_mean_last5": 0.25148486271896436,
+        "mean_confirmed_effect": 0.5288717348870333,
+        "promoted": 2,
+        "screen_untrusted": false,
+        "since_last_accept": 2,
+        "status": "ended",
+        "wall_s": 586.6,
+        "wall_s_per_accept": 586.6
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "paired": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    }
+  ],
+  "engine_version": "1.1.0",
+  "env": "darwin-23.6.0-arm64-8cores-py3.14",
+  "generated_at": "2026-09-03T08:44:52Z",
+  "seed": null
+}
