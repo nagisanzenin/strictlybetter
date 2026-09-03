@@ -124,6 +124,26 @@ On Claude Code the Stop hook keeps cycles going until the budget is spent, the l
 
 ---
 
+## Why not just prompt "improve metric X"?
+
+For one sitting with you watching, the prompt wins: a plausible diff in five minutes, your judgment in the loop, no worktrees or confirmation runs. The plugin exists for the case where you want to walk away, and the differences are structural, not stylistic.
+
+| A prompted agent | strictlybetter |
+|---|---|
+| Grades its own work. When it plateaus it has every incentive to find a shortcut, and the casebook shows frontier agents take planted ones more than half the time, knowingly. | The evaluator is frozen by a hook and a hash, the judge never sees the agent's reasoning, confirmation runs on inputs the agent never saw. Eight blind attacks that made the raw metric look 30 to 30,000× better: 0 accepted. |
+| Cannot tell a win from noise. One run on a busy laptop is noise a large share of the time; the naive keep-if-better rule accepted a no-op 5 times in 8 in the power study. | Acceptance is an exact paired test at a stated α; no-ops were accepted 0 times in 8 at the same noise floor. |
+| Remembers only its context window. After compaction or tomorrow it re-tries dead ends. | The ledger and the inheritance body are written by the engine and read cold; the bandit, dead-end list, archive, and ratcheted floors carry into the next campaign. The tenth campaign starts smarter than the first. |
+| Trades yesterday's win for today's without saying so. | Every past goal is re-measured on every keep. Goals that genuinely trade off get a mapped frontier instead of a hidden trade. |
+| Waits hours per idea on a slow instrument, or trusts a proxy blindly. | The proxy ladder screens on recorded-replay proxies in seconds and audits the real instrument on a cadence that measures whether the proxies are lying. |
+| Hands you a diff and a claim. | Hands you a commit whose message carries the pre-registration, before-and-after with p-value and pair count, the judge verdict; a report that is the PR description; every number traceable to a file. |
+| Leaves nothing behind for the next person. | The metric cards, noise floors, degradation probes, and frozen-path list are assets your CI can use whether or not the loop runs again. |
+
+**The honest counterweight.** The plugin is only as good as the instrument it is given. The two real defects the live runs found were both instrument mistakes (a duration floor set from the baseline; a bench that times a call and discards its result), and a prompt with a bad benchmark fails the same way. The plugin fails with a paper trail and a judge that caught the exploits. Where you have no instrument at all, a prompt and a conversation are the right tool; greenfield instrument campaigns are a plan on paper here, not a proven path.
+
+So: the prompt for a diff today; the plugin for a repo that should keep getting better after you stop looking, with evidence someone else can check.
+
+---
+
 ## Why it will not fool you
 
 Six months of autoresearch-style loops produced a casebook of agents gaming their own metrics: replacing the model with a search engine and reporting zero training time, hard-coding per-tournament offsets into `predict_proba`, compiling a C sort behind a Python benchmark, editing the test. Every one of those is caught here by construction, not by asking the agent nicely:
