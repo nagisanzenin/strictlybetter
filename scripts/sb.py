@@ -4015,7 +4015,7 @@ def selftest() -> int:
         with open(os.path.join(repo, "proxy.py"), "w") as f:
             f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\nprint('METRIC stage_ms=%d' % (work.N + r.randint(0, 1)))\n")
         with open(os.path.join(repo, "real.py"), "w") as f:
-            f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\nprint('METRIC full_s=%d' % (2 * work.N + r.randint(0, 1)))\n")
+            f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\nprint('METRIC full_s=%d' % (2 * work.N + getattr(work, 'PAD', 0) + r.randint(0, 1)))\n")
         git(["add", "-A"], repo)
         git(["commit", "-q", "-m", "base"], repo)
         home = Home(repo=repo, home=os.path.join(repo, ".strictlybetter"))
@@ -4027,10 +4027,10 @@ def selftest() -> int:
         home.save_card({"id": "full_s", "kind": "goal", "direction": "minimize", "unit": "units",
                         "measure": {"command": "python3 real.py", "parse": "metric-line:full_s", "timeout_s": 60},
                         "fidelity": {"confirm": {"repeats": 3, "holdout": {"kind": "env", "var": "SB_SEED", "values": [11, 12, 13]}}},
-                        "audit": {"every_accepts": 1, "discard_sample_rate": 1.0, "pairs": 3, "alpha": 0.05},
+                        "audit": {"every_accepts": 2, "discard_sample_rate": 1.0, "pairs": 3, "alpha": 0.05},
                         "integrity": {"frozen_paths": ["real.py"]}, "gaming_risks": ["x"], "contention_safe": True})
         sp = os.path.join(td, "c.json")
-        write_json_atomic(sp, {"id": "pl", "goals": ["stage_ms"], "audits": ["full_s"], "budget": {"experiments": 8}, "walls": {"judge": False}})
+        write_json_atomic(sp, {"id": "pl", "goals": ["stage_ms"], "audits": ["full_s"], "budget": {"experiments": 12}, "walls": {"judge": False}})
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_campaign(home, argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
         c = home.campaign()
@@ -4082,11 +4082,23 @@ def selftest() -> int:
         e2, res2 = run_pl(30, "no-op (same N): discard, sampled audit at rate 1.0", extra="# no-op\n")
         c = home.campaign()
         check("proxy ladder: discard is audited at the sampled rate", res2.startswith("discard") and any(a["kind"] == "discard" for a in c.get("audit_history") or []))
-        for k in (25, 20, 15):
+        run_pl(25, "win N=25 (no audit: since=1 < every_accepts=2)")
+        c = home.campaign()
+        check("proxy ladder: no audit between cadence points", len([a for a in c["audit_history"] if a["kind"] == "accept"]) == 1)
+        for k in (20, 15, 10):
             run_pl(k, f"win N={k}")
         c = home.campaign()
+        check("proxy ladder: audits fire on the cadence", len([a for a in c["audit_history"] if a["kind"] == "accept"]) == 3)
         check("proxy ladder: trust becomes validated after enough agreeing audits", home.load_card("stage_ms").get("trust") == "validated")
         check("proxy ladder: card fingerprint tolerates the engine's trust change", home.campaign().get("status") == "running")
+        real_best_before = home.ratchet()["full_s"]["best"]
+        run_pl(8, "win N=8 (since=1)")
+        e_fp, res_fp = run_pl(5, "proxy-only win: proxy better, real worse", extra="PAD = 40\n")
+        c = home.campaign()
+        last = c["audit_history"][-1]
+        check("proxy ladder: a proxy-only win is audited and found worse", res_fp == "accept" and last["kind"] == "accept" and last["metrics"]["full_s"]["verdict"] == "worse")
+        check("proxy ladder: real ratchet does not move on a worse audit", home.ratchet()["full_s"]["best"] == real_best_before)
+        check("proxy ladder: false promotion recorded and trust drops to suspect", c["proxy_fidelity"]["stage_ms"]["false_promotions"] == 1 and home.load_card("stage_ms").get("trust") == "suspect")
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_campaign(home, argparse.Namespace(action="end", file=None, reason="done", no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False, allow_underpowered=False))
         c = home.campaign()
