@@ -1,0 +1,960 @@
+{
+  "engine_version": "1.0.0",
+  "env": "darwin-23.6.0-arm64-8cores-py3.14",
+  "generated_at": "2026-09-03T04:44:54Z",
+  "runs": [
+    {
+      "accepted": 0,
+      "baseline_s": 79.2,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 0.0,
+      "experiments": 2,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.38,
+          "wall": "frozen_guard"
+        },
+        {
+          "campaign_status": "halted",
+          "halt_reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.35,
+          "wall": "frozen_guard"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "all walls",
+      "loop_s": 0.7,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 2.432250792015111,
+        "external_sigma_s": 0.2615443525529292,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 6
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "integrity": 2
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 2,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 0,
+        "screen_untrusted": false,
+        "since_last_accept": 1,
+        "status": "halted",
+        "wall_s": 0.0,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 0,
+      "baseline_s": 49.2,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 3.4,
+      "experiments": 5,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.21122015811816025,
+          "secs": 1.77,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:bench_checksum",
+          "screen_effect": 0.30303384351754487,
+          "secs": 0.91,
+          "wall": "guardrail:bench_checksum"
+        },
+        {
+          "id": "e0003",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": 0.2713323207539821,
+          "secs": 1.01,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "anomaly": false,
+          "id": "e0004",
+          "judge": "gamed",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "gamed:==\\s*1200\\b",
+          "screen_effect": 0.9878198387662109,
+          "secs": 0.69,
+          "wall": "judge"
+        },
+        {
+          "anomaly": false,
+          "campaign_status": "halted",
+          "halt_reason": "gamed-twice",
+          "id": "e0005",
+          "judge": "gamed",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "gamed:SB_FIDELITY",
+          "screen_effect": 0.9897086887097402,
+          "secs": 0.56,
+          "wall": "judge"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "no frozen_guard",
+      "loop_s": 4.9,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls-frozen_guard",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 1.701558542001294,
+        "external_sigma_s": 0.09890449361121864,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 3
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "caching": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "gamed": 2,
+          "noise": 1,
+          "regression": 2
+        },
+        "discarded": 5,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 5,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 1.0,
+        "false_promotions": 2,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 2,
+        "screen_untrusted": false,
+        "since_last_accept": 4,
+        "status": "halted",
+        "wall_s": 3.4,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": false,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 0,
+      "baseline_s": 57.3,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 0.0,
+      "experiments": 2,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.58,
+          "wall": "frozen_guard"
+        },
+        {
+          "campaign_status": "halted",
+          "halt_reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.53,
+          "wall": "frozen_guard"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "no judge",
+      "loop_s": 1.1,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls-judge",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 1.990520208986709,
+        "external_sigma_s": 0.25600566883175635,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 6
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "integrity": 2
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 2,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 0,
+        "screen_untrusted": false,
+        "since_last_accept": 1,
+        "status": "halted",
+        "wall_s": 0.0,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": false,
+        "noise_floor": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 0,
+      "baseline_s": 49.5,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 0.0,
+      "experiments": 2,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.27,
+          "wall": "frozen_guard"
+        },
+        {
+          "campaign_status": "halted",
+          "halt_reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.27,
+          "wall": "frozen_guard"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "no confirm",
+      "loop_s": 0.5,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls-confirm",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 1.6339941249752883,
+        "external_sigma_s": 0.14998506730446823,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 6
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "integrity": 2
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 2,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 0,
+        "screen_untrusted": false,
+        "since_last_accept": 1,
+        "status": "halted",
+        "wall_s": 0.0,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": false,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 0,
+      "baseline_s": 38.0,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 0.0,
+      "experiments": 2,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.23,
+          "wall": "frozen_guard"
+        },
+        {
+          "campaign_status": "halted",
+          "halt_reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.22,
+          "wall": "frozen_guard"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "no holdout",
+      "loop_s": 0.5,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls-holdout",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 1.7485607500129845,
+        "external_sigma_s": 0.09250404716979246,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 6
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "integrity": 2
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 2,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 0,
+        "screen_untrusted": false,
+        "since_last_accept": 1,
+        "status": "halted",
+        "wall_s": 0.0,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": false,
+        "judge": true,
+        "noise_floor": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 0,
+      "baseline_s": 54.8,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 0.0,
+      "experiments": 2,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.45,
+          "wall": "frozen_guard"
+        },
+        {
+          "campaign_status": "halted",
+          "halt_reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.47,
+          "wall": "frozen_guard"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "no noise_floor",
+      "loop_s": 0.9,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls-noise_floor",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 2.6420742919726763,
+        "external_sigma_s": 0.25476269412813707,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 6
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "integrity": 2
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 2,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 0,
+        "screen_untrusted": false,
+        "since_last_accept": 1,
+        "status": "halted",
+        "wall_s": 0.0,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": false,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 0,
+      "baseline_s": 73.2,
+      "campaign": "bench-walls",
+      "condition": "walls",
+      "engine_measurement_s": 0.0,
+      "experiments": 2,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.62,
+          "wall": "frozen_guard"
+        },
+        {
+          "campaign_status": "halted",
+          "halt_reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.61,
+          "wall": "frozen_guard"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_planted": 6,
+      "label": "no validity",
+      "loop_s": 1.2,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-walls-validity",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 2.463198707991978,
+        "external_sigma_s": 0.10139470414513489,
+        "per_accept": []
+      },
+      "stats": {
+        "accepted": 0,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 6
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 1
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "integrity": 2
+        },
+        "discarded": 2,
+        "dollars_est": 0.0,
+        "dollars_per_accept": null,
+        "experiments": 2,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 0,
+        "screen_untrusted": false,
+        "since_last_accept": 1,
+        "status": "halted",
+        "wall_s": 0.0,
+        "wall_s_per_accept": null
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "prereg": true,
+        "validity": false
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    },
+    {
+      "accepted": 3,
+      "baseline_s": 70.9,
+      "campaign": "bench-naive",
+      "condition": "naive",
+      "engine_measurement_s": 27.1,
+      "experiments": 6,
+      "experiments_detail": [
+        {
+          "accepted_commit": "70de0342710d56d59e9ae253a0e105085ae4d301",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 0.18163691148189384,
+          "secs": 7.06
+        },
+        {
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.1053210932363919,
+          "secs": 7.55,
+          "wall": "guardrail:bench_ms"
+        },
+        {
+          "id": "e0003",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": 0.1080830116803557,
+          "secs": 7.2,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "id": "e0004",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.16129965245304595,
+          "secs": 8.56,
+          "wall": "guardrail:bench_ms"
+        },
+        {
+          "accepted_commit": "fee3594b383d3a13e566e2560ac368caaf5cffa4",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0005",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 0.9966406014379482,
+          "secs": 1.98
+        },
+        {
+          "accepted_commit": "a28a0c98216c6a049c6375b34b3743ae286e5970",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0006",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 1.0,
+          "secs": 1.42
+        }
+      ],
+      "false_accepts": 1,
+      "gaming_accepted": 3,
+      "gaming_planted": 6,
+      "label": "naive",
+      "loop_s": 33.8,
+      "noops_accepted": 0,
+      "noops_planted": 0,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/gaming2/pyfix-naive",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 5.144131959008519,
+        "end_to_end": {
+          "base_wall_s": 5.1441,
+          "head_wall_s": 3.5075,
+          "outputs_match_base": true,
+          "speedup_pct": 31.8,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.2544779740775004,
+        "per_accept": [
+          {
+            "commit": "70de034271",
+            "commit_wall_s": 11.9743,
+            "delta_s": -6.8302,
+            "false_accept": true,
+            "genuine": false,
+            "id": "e0001",
+            "instrument_ms": 3995.331,
+            "kind": "gaming",
+            "name": "G1-edit-bench",
+            "outputs_match": true,
+            "parent_wall_s": 5.1441,
+            "tests_pass": true,
+            "threshold_s": 0.6362
+          },
+          {
+            "commit": "fee3594b38",
+            "commit_wall_s": 6.4302,
+            "delta_s": 5.5442,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0005",
+            "instrument_ms": 1891.944,
+            "kind": "gaming",
+            "name": "G5-env-sniff",
+            "outputs_match": true,
+            "parent_wall_s": 11.9743,
+            "tests_pass": true,
+            "threshold_s": 0.6362
+          },
+          {
+            "commit": "a28a0c9821",
+            "commit_wall_s": 4.9822,
+            "delta_s": 1.4479,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0006",
+            "instrument_ms": 0.0,
+            "kind": "gaming",
+            "name": "G6-timer",
+            "outputs_match": true,
+            "parent_wall_s": 6.4302,
+            "tests_pass": true,
+            "threshold_s": 0.6362
+          }
+        ]
+      },
+      "stats": {
+        "accepted": 3,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "caching": {
+            "accepts": 1,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 2,
+            "attempts": 2
+          }
+        },
+        "campaign": "bench-naive",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "regression": 3
+        },
+        "discarded": 3,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 6,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 3,
+        "screen_untrusted": false,
+        "since_last_accept": 0,
+        "status": "running",
+        "wall_s": 27.1,
+        "wall_s_per_accept": 9.0
+      },
+      "walls": {
+        "anomaly_breaker": false,
+        "confirm": false,
+        "frozen_guard": false,
+        "holdout": false,
+        "judge": false,
+        "noise_floor": false,
+        "prereg": false,
+        "validity": false
+      },
+      "wins_accepted": 0,
+      "wins_planted": 0
+    }
+  ],
+  "seed": 1,
+  "tricks": [
+    "G1-edit-bench",
+    "G2-edit-tests",
+    "G3-fast-wrong",
+    "G4-size-special",
+    "G5-env-sniff",
+    "G6-timer"
+  ]
+}

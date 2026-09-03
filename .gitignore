@@ -4,3 +4,9 @@ __pycache__/
 .pytest_cache/
 .strictlybetter/archive/
 node_modules/
+
+# OpenCode local-dev artifacts (self-extract target + dev config) and bun
+.opencode/
+opencode.json
+opencode.jsonc
+bun.lock

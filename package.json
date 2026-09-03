@@ -1,0 +1,74 @@
+{
+  "name": "opencode-strictlybetter",
+  "version": "1.0.0",
+  "description": "Universal noise-aware research loop for OpenCode and pi: discover metrics, measure sigma, pre-register experiments, blind-judge, confirm on holdout. Every merge is strictly better.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "bun test __tests__",
+    "selftest": "python3 scripts/sb.py selftest"
+  },
+  "main": "./.opencode-plugin/entry.ts",
+  "exports": {
+    ".": "./.opencode-plugin/entry.ts",
+    "./server": "./.opencode-plugin/entry.ts",
+    "./v2": "./.opencode-plugin/v2.ts"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "research-loop",
+    "autoresearch",
+    "optimization",
+    "benchmarking",
+    "pi-package",
+    "dsh-plugin",
+    "zcode-plugin"
+  ],
+  "engines": {
+    "opencode": ">=1.0.0 || >=0.0.0-0"
+  },
+  "pi": {
+    "extensions": [
+      "./pi/strictlybetter.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./pi/prompts"
+    ]
+  },
+  "files": [
+    ".opencode-plugin",
+    "hooks",
+    "skills",
+    "agents",
+    "scripts",
+    "archetypes",
+    "operators",
+    "templates",
+    "bench/run_bench.py",
+    "tests/fixtures",
+    "docs",
+    ".claude-plugin",
+    ".codex-plugin",
+    ".zcode-plugin",
+    "codex",
+    "pi",
+    "dsh",
+    "plugin.json",
+    "INSTALL-CODEX.md",
+    "INSTALL-OPENCODE-V2.md",
+    "INSTALL-HERMES.md",
+    "INSTALL-ANTIGRAVITY.md",
+    "INSTALL-OPENCLAW.md",
+    "INSTALL-PI.md",
+    "INSTALL-DSH.md",
+    "INSTALL-ZCODE.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nagisanzenin/researchloop.git"
+  }
+}

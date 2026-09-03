@@ -1,0 +1,24 @@
+{
+  "name": "strictlybetter",
+  "version": "1.0.0",
+  "description": "Universal noise-aware research loop for agentic coders: discover metrics, measure sigma, pre-register, confirm on holdout. Every merge is strictly better.",
+  "author": {
+    "name": "nagisanzenin"
+  },
+  "homepage": "https://github.com/nagisanzenin/researchloop",
+  "keywords": [
+    "research-loop",
+    "autoresearch",
+    "optimization",
+    "benchmarking",
+    "noise-floor",
+    "pareto",
+    "experiments",
+    "continuous-improvement"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "strictlybetter",
+    "category": "development"
+  }
+}

@@ -1,0 +1,39 @@
+# strictlybetter — DeepSeek Harness hook patch
+# =============================================
+# Enables dsh's Claude Code hook bridge and points it at strictlybetter's dsh hook
+# file (dsh/hooks.json). Its SessionStart entry runs hooks/session-start-dsh.sh, which
+# emits the JSON additionalContext shape the bridge consumes — dsh discards plain
+# SessionStart stdout, so the stock Claude Code hook would run but deliver nothing.
+# The PreToolUse (frozen-path guard, exit 2 = deny) and Stop (campaign driver, JSON
+# {"decision":"block"}) entries are the unmodified Claude Code hooks; whether dsh's
+# bridge honors a deny and a block is NOT verified (INSTALL-DSH.md) — if it does not,
+# the guard is the gate-time `sb submit` check and the loop is driven by
+# `sb drive --command`, exactly as on hosts without those events.
+#
+# Install — THREE steps, order matters, repeat per profile (web, headless):
+#
+#   1. The bridge and its one out-of-closure peer are NOT in the dsh npm bundle
+#      (an override-style patch naming an unknown id fails SILENTLY; the insert
+#      form below fails loud — which is what you want):
+#        dsh plugin --profile web add @deepseek-ai/dsh-hooks-claude-code
+#        dsh plugin --profile web add @deepseek-ai/dsh-hook-protocol
+#      (dsh's plugin command needs pnpm on PATH: `npm i -g pnpm` or corepack.)
+#   2. Open $DSH_HOME/profiles/web/cordis.patch.yml (created on that profile's
+#      first boot), REPLACE the trailing empty list `[]` with the insert block
+#      below, substituting your absolute home path — `~` is not expanded. (If you
+#      already have patch entries, append this as one more `- insert:` list item
+#      instead, and never paste it twice: duplicate `strictlybetter-hooks` entries
+#      load the bridge twice with no warning and you get two nudges.)
+#   3. Restart the profile.
+#
+# Verify with a hook EVENT, not a clean boot: after your next prompt in a repository
+# with a running campaign, the "[strictlybetter] campaign … running" line appears in
+# the session (or: grep -l hook $DSH_HOME/sessions/*/*/session.jsonl.zstd). A missing
+# package fails loud at boot with the insert form; a clean boot plus a fired hook is
+# the real pair.
+- insert:
+    - id: strictlybetter-hooks
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: /ABSOLUTE/HOME/.agents/strictlybetter/dsh/hooks.json
+        pluginRoot: /ABSOLUTE/HOME/.agents/strictlybetter

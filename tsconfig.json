@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node", "bun"]
+  },
+  "include": [
+    ".opencode-plugin/**/*.ts",
+    "hooks/**/*.ts",
+    "pi/**/*.ts",
+    "__tests__/**/*.ts"
+  ]
+}
