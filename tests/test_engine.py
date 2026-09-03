@@ -26,8 +26,10 @@ WALLS = {k: True for k in sb.WALL_KEYS}
 
 
 class ParseTests(unittest.TestCase):
-    def test_metric_line_last_wins(self):
-        self.assertEqual(sb.parse_output("metric-line:x", "METRIC x=1\nMETRIC x=2\n"), 2.0)
+    def test_metric_line_duplicate_is_ambiguous(self):
+        with self.assertRaises(sb.SBError):
+            sb.parse_output("metric-line:x", "METRIC x=1\nMETRIC x=2\n")
+        self.assertEqual(sb.parse_output("metric-line:x", "METRIC x=1\nMETRIC y=2\n"), 1.0)
 
     def test_metric_line_in_stderr(self):
         self.assertEqual(sb.parse_output("metric-line:x", "", "METRIC x=5"), 5.0)

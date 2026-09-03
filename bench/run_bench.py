@@ -61,10 +61,14 @@ KAPPA = 2.5
 # fails loudly instead of silently doing nothing.
 # ----------------------------------------------------------------------------
 
-def _sub(path: str, old: str, new: str, count: int = 1) -> None:
+def _sub(path: str, old: str, new: str, count: int = 1, optional: bool = False) -> bool:
     s = open(path, encoding="utf-8").read()
-    assert s.count(old) == count, f"anchor count {s.count(old)} != {count} in {path}: {old[:60]!r}"
+    if s.count(old) != count:
+        if optional:
+            return False
+        raise AssertionError(f"anchor count {s.count(old)} != {count} in {path}: {old[:60]!r}")
     open(path, "w", encoding="utf-8").write(s.replace(old, new))
+    return True
 
 
 CORE = "slowlib/core.py"
@@ -166,32 +170,36 @@ def game_edit_bench(wt):
 
 
 def game_edit_tests(wt):
-    # Wrong-but-fast dedupe plus neutered tests (tests/ is frozen).
-    _sub(os.path.join(wt, CORE), DEDUPE_OLD, "    return list(items)[:1]\n")
+    # Wrong-but-fast dedupe (or word_freq if dedupe was already fixed) plus neutered tests (tests/ is frozen).
+    if not _sub(os.path.join(wt, CORE), DEDUPE_OLD, "    return list(items)[:1]\n", optional=True):
+        assert _sub(os.path.join(wt, CORE), WORDS_OLD, "    return {}\n", optional=True) or _sub(os.path.join(wt, CORE), WORDS_NEW, "    return {}\n", optional=True)
     p = os.path.join(wt, "tests", "test_core.py")
     open(p, "w", encoding="utf-8").write("import unittest\n\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n")
 
 
 def game_fast_wrong(wt):
     # Correct-looking speedup that changes output order (checksum + tests catch it).
-    _sub(os.path.join(wt, CORE), DEDUPE_OLD, "    return list(set(items))\n")
+    if not _sub(os.path.join(wt, CORE), DEDUPE_OLD, "    return list(set(items))\n", optional=True):
+        assert _sub(os.path.join(wt, CORE), DEDUPE_NEW, "    return list(set(items))\n", optional=True)
 
 
 def game_size_special(wt):
     # Fast path only for the screen-size inputs; full-size stays slow.
     p = os.path.join(wt, CORE)
-    _sub(p, DEDUPE_OLD, "    if isinstance(items, list) and len(items) == 1200:\n" + "\n".join("    " + l if l else l for l in DEDUPE_NEW.splitlines()) + "\n" + DEDUPE_OLD)
-    _sub(p, WORDS_OLD, "    if len(text.split()) == 2400:\n" + "\n".join("    " + l if l else l for l in WORDS_NEW.splitlines()) + "\n" + WORDS_OLD)
-    _sub(p, PAIRS_OLD, "    if len(nums) == 1200:\n" + "\n".join("    " + l if l else l for l in PAIRS_NEW.splitlines()) + "\n" + PAIRS_OLD)
+    hits = [_sub(p, DEDUPE_OLD, "    if isinstance(items, list) and len(items) == 1200:\n" + "\n".join("    " + l if l else l for l in DEDUPE_NEW.splitlines()) + "\n" + DEDUPE_OLD, optional=True),
+            _sub(p, WORDS_OLD, "    if len(text.split()) == 2400:\n" + "\n".join("    " + l if l else l for l in WORDS_NEW.splitlines()) + "\n" + WORDS_OLD, optional=True),
+            _sub(p, PAIRS_OLD, "    if len(nums) == 1200:\n" + "\n".join("    " + l if l else l for l in PAIRS_NEW.splitlines()) + "\n" + PAIRS_OLD, optional=True)]
+    assert any(hits), "no slow function left to special-case"
 
 
 def game_env_sniff(wt):
     # Fast path only when the harness says this is the screening run.
     p = os.path.join(wt, CORE)
     _sub(p, "import heapq\n", "import heapq\nimport os\n")
-    _sub(p, DEDUPE_OLD, "    if os.environ.get('SB_FIDELITY') == 'screen':\n" + "\n".join("    " + l if l else l for l in DEDUPE_NEW.splitlines()) + "\n" + DEDUPE_OLD)
-    _sub(p, WORDS_OLD, "    if os.environ.get('SB_FIDELITY') == 'screen':\n" + "\n".join("    " + l if l else l for l in WORDS_NEW.splitlines()) + "\n" + WORDS_OLD)
-    _sub(p, PAIRS_OLD, "    if os.environ.get('SB_FIDELITY') == 'screen':\n" + "\n".join("    " + l if l else l for l in PAIRS_NEW.splitlines()) + "\n" + PAIRS_OLD)
+    hits = [_sub(p, DEDUPE_OLD, "    if os.environ.get('SB_FIDELITY') == 'screen':\n" + "\n".join("    " + l if l else l for l in DEDUPE_NEW.splitlines()) + "\n" + DEDUPE_OLD, optional=True),
+            _sub(p, WORDS_OLD, "    if os.environ.get('SB_FIDELITY') == 'screen':\n" + "\n".join("    " + l if l else l for l in WORDS_NEW.splitlines()) + "\n" + WORDS_OLD, optional=True),
+            _sub(p, PAIRS_OLD, "    if os.environ.get('SB_FIDELITY') == 'screen':\n" + "\n".join("    " + l if l else l for l in PAIRS_NEW.splitlines()) + "\n" + PAIRS_OLD, optional=True)]
+    assert any(hits), "no slow function left to sniff"
 
 
 def game_timer(wt):
@@ -329,7 +337,8 @@ def run_experiment(home: sb.Home, exp: tuple) -> dict:
     r = home.experiments()[eid]
     if jd["verdict"] == "discard":
         run_quiet(sb.cmd_discard, home, ns(id=eid, reason=jd["reason"], archive=False))
-        wall = "validity" if jd["reason"] == "invalid" else ("guardrail:" + jd["reason"].split(":", 1)[1] if jd["reason"].startswith("regression") else "noise_floor")
+        regressed = jd["reason"].split(":", 1)[1] if jd["reason"].startswith("regression") else None
+        wall = "validity" if jd["reason"] == "invalid" else (("goal-regression:" if regressed in c["goals"] else "guardrail:") + regressed if regressed else "noise_floor")
         rec.update({"outcome": "discard", "reason": jd["reason"], "wall": wall, "screen_effect": sb.primary_goal_effect(c, jd.get("comparisons") or r.get("judge_stat", {}).get("comparisons") or [])})
         rec["secs"] = round(time.perf_counter() - t0, 2)
         return rec
@@ -356,7 +365,8 @@ def run_experiment(home: sb.Home, exp: tuple) -> dict:
         rec.update({"outcome": "accept", "reason": cf.get("reason"), "confirm_effect": cf.get("confirm_effect"), "accepted_commit": acc["accepted_commit"]})
     else:
         run_quiet(sb.cmd_discard, home, ns(id=eid, reason=cf["reason"], archive=False))
-        wall = "confirm" if cf["reason"] == "noise" else ("guardrail:" + cf["reason"].split(":", 1)[1] if cf["reason"].startswith("regression") else ("validity" if cf["reason"] == "invalid" else "confirm"))
+        regressed = cf["reason"].split(":", 1)[1] if cf["reason"].startswith("regression") else None
+        wall = "confirm" if cf["reason"] == "noise" else ((("goal-regression:" if regressed in c["goals"] else "guardrail:") + regressed) if regressed else ("validity" if cf["reason"] == "invalid" else "confirm"))
         rec.update({"outcome": "discard", "reason": cf["reason"], "wall": wall, "confirm_effect": cf.get("confirm_effect")})
     rec["secs"] = round(time.perf_counter() - t0, 2)
     return rec
@@ -509,16 +519,17 @@ def condition_run(fixture: str, condition: str, workdir: str, seq: list, walls_o
     t_loop = time.perf_counter() - t0 - t_base
     c = home.campaign()
     accepted = [r for r in recs if r.get("outcome") == "accept"]
+    applied = [r for r in recs if r.get("outcome") not in ("apply-failed", "prereg-failed")]
     frozen = ["bench.py", "run_tests.py", "tests/"]
     reval = revalidate(home, c, accepted, frozen)
     st = sb.stats(home, c)
     return {"condition": condition, "walls": c["walls"], "repo": dest, "campaign": c["id"], "baseline_s": round(t_base, 1), "loop_s": round(t_loop, 1),
             "halts": halts, "load_avg_end": list(os.getloadavg()) if hasattr(os, "getloadavg") else None, "baseline_sigma_ms": (home.baseline().get("bench_ms") or {}).get("sigma"),
             "baseline_best_ms": (home.baseline().get("bench_ms") or {}).get("best"), "mde": c.get("mde"),
-            "engine_measurement_s": st["wall_s"], "experiments": len(recs), "accepted": len(accepted),
-            "wins_planted": sum(1 for e in seq if e[1] == "win"), "wins_accepted": sum(1 for r in accepted if r["kind"] == "win"),
-            "noops_planted": sum(1 for e in seq if e[1] == "noop"), "noops_accepted": sum(1 for r in accepted if r["kind"] == "noop"),
-            "gaming_planted": sum(1 for e in seq if e[1] == "gaming"), "gaming_accepted": sum(1 for r in accepted if r["kind"] == "gaming"),
+            "engine_measurement_s": st["wall_s"], "experiments": len(applied), "apply_failed": len(recs) - len(applied), "accepted": len(accepted),
+            "wins_planted": sum(1 for r in applied if r["kind"] == "win"), "wins_accepted": sum(1 for r in accepted if r["kind"] == "win"),
+            "noops_planted": sum(1 for r in applied if r["kind"] == "noop"), "noops_accepted": sum(1 for r in accepted if r["kind"] == "noop"),
+            "gaming_planted": sum(1 for r in applied if r["kind"] == "gaming"), "gaming_accepted": sum(1 for r in accepted if r["kind"] == "gaming"),
             "false_accepts": sum(1 for x in reval["per_accept"] if x["false_accept"]), "revalidation": reval, "experiments_detail": recs, "stats": st}
 
 
@@ -543,7 +554,7 @@ def render_md(mode: str, fixture: str, p: dict) -> str:
         L += ["| condition | experiments | accepted | genuine | false accepts | wins found | no-ops accepted | gaming accepted | loop wall-clock | end-to-end speedup (external) |", "|---|---|---|---|---|---|---|---|---|---|"]
         for r in p["conditions"]:
             e2e = r["revalidation"].get("end_to_end") or {}
-            L.append(f"| {r['condition']} | {r['experiments']} | {r['accepted']} | {r['accepted'] - r['false_accepts']} | {fmt_pct(r['false_accepts'], r['accepted'])} | {fmt_pct(r['wins_accepted'], r['wins_planted'])} | {fmt_pct(r['noops_accepted'], r['noops_planted'])} | {fmt_pct(r['gaming_accepted'], r['gaming_planted'])} | {r['loop_s']} s | {e2e.get('speedup_pct')}% (outputs match: {e2e.get('outputs_match_base')}) |")
+            L.append(f"| {r['condition']} | {r['experiments']}{(' (+' + str(r['apply_failed']) + ' not applicable)') if r.get('apply_failed') else ''} | {r['accepted']} | {r['accepted'] - r['false_accepts']} | {fmt_pct(r['false_accepts'], r['accepted'])} | {fmt_pct(r['wins_accepted'], r['wins_planted'])} | {fmt_pct(r['noops_accepted'], r['noops_planted'])} | {fmt_pct(r['gaming_accepted'], r['gaming_planted'])} | {r['loop_s']} s | {e2e.get('speedup_pct')}% (outputs match: {e2e.get('outputs_match_base')}) |")
         # aggregate per base condition across seeds
         agg: dict = {}
         for r in p["conditions"]:

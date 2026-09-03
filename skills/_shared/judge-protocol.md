@@ -12,50 +12,12 @@ judge that cannot see the argument cannot be persuaded by it.
 
 ## Payload: `.strictlybetter/inbox/judge-<id>.json`
 
-Composed on disk by the block below. Nothing from the conversation enters it.
-
-```bash
-# Compose the blind judge's payload. RUN THIS BLOCK VERBATIM after `$SB judge $ID` printed
-# "verdict": "promote". Set ID first. Requires the engine-resolution block ($SB, $SB_ROOT…).
-ID=e0001
-IN="$SB_REPO/.strictlybetter/inbox"; mkdir -p "$IN"
-W="$($SB worktree path "$ID")"
-git -C "$W" diff "$(git -C "$W" rev-parse HEAD^)" HEAD > "$IN/judge-$ID.diff"
-$SB ledger view "$ID" > "$IN/judge-$ID.record.json"
-$SB next --json > "$IN/judge-$ID.brief.json"
-python3 - "$ID" "$IN" "$SB_ROOT" "$SB_PY" "$SB_REPO" <<'PY'
-import json, re, subprocess, sys
-eid, inbox, root, sb_py, repo = sys.argv[1:6]
-assert re.fullmatch(r"e\d{4,}", eid), f"bad experiment id {eid!r}"
-rec = json.load(open(f"{inbox}/judge-{eid}.record.json"))
-brief = json.load(open(f"{inbox}/judge-{eid}.brief.json"))
-js = rec.get("judge_stat") or {}
-risks = {}
-for mid in list(brief.get("goals") or []) + list(brief.get("guardrails") or []):
-    out = subprocess.run([sys.executable, sb_py, "--repo", repo, "card", "show", mid], capture_output=True, text=True).stdout
-    risks[mid] = (json.loads(out).get("gaming_risks") or []) if out.strip() else []
-payload = {
-    "id": eid,
-    "checklist": f"{root}/templates/judge-checklist.md",
-    "prereg": {k: rec.get(k) for k in ["operator", "target", "hypothesis", "predicted", "mechanism", "expected_diff_size", "prereg_hash"]},
-    "diff": {"lines": rec.get("diff_lines"), "files": rec.get("files"), "new_deps": rec.get("new_deps"),
-             "text": open(f"{inbox}/judge-{eid}.diff", encoding="utf-8", errors="replace").read()},
-    "screen": {"verdict": js.get("verdict"), "reason": js.get("reason"), "kappa_eff": js.get("kappa_eff"),
-               "anomaly": js.get("anomaly"), "comparisons": js.get("comparisons")},
-    "gaming_risks": risks,
-    "frozen_paths": brief.get("frozen_paths"),
-    "protected_paths": brief.get("protected_paths"),
-}
-with open(f"{inbox}/judge-{eid}.json", "w", encoding="utf-8") as f:
-    json.dump(payload, f, indent=2)
-print(f"{inbox}/judge-{eid}.json")
-PY
-```
-
-Payload keys, exhaustively: `id`, `checklist` (path), `prereg` (operator, target, hypothesis,
-predicted, mechanism, expected_diff_size, prereg_hash), `diff` (lines, files, new_deps, text),
-`screen` (verdict, reason, kappa_eff, anomaly, comparisons[]), `gaming_risks` (per metric),
-`frozen_paths`, `protected_paths`. There is no `notes`, no `context`, no `experimenter_says`.
+Written by `sb judge-payload <id>`. Keys: `id`, `campaign`, `checklist` (path to
+`templates/judge-checklist.md`), `prereg` (operator, target, hypothesis, predicted, mechanism,
+expected_diff_size, prereg_hash), `diff` (`lines`, `files`, `new_deps`, `text`), `screen`
+(verdict, reason, kappa_eff, anomaly, comparisons), `gaming_risks` (per metric),
+`frozen_paths`, `protected_paths`, `verdict_schema`. The engine composes it from the ledger and
+the git diff, so nothing from the orchestrator's transcript can reach the judge.
 
 ## Spawning
 

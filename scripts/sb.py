@@ -257,17 +257,17 @@ def parse_output(spec: str, out: str, err: str = ""):
         found = pat.findall(text) or pat.findall(err or "")
         if not found:
             raise SBError(f"metric line 'METRIC {name}=...' not found in output")
+        if len(found) > 1:
+            raise SBError(f"ambiguous: 'METRIC {name}=' printed {len(found)} times (editable code may be printing a second line)")
         return coerce_value(found[-1])
     if spec.startswith("regex:"):
         pat = re.compile(spec[len("regex:"):], re.MULTILINE)
-        m = None
-        for m in pat.finditer(text):
-            pass
-        if m is None:
-            for m in pat.finditer(err or ""):
-                pass
-        if m is None:
+        ms = list(pat.finditer(text)) or list(pat.finditer(err or ""))
+        if not ms:
             raise SBError("regex did not match output")
+        if len(ms) > 1 and len({mm.group(1) if mm.groups() else mm.group(0) for mm in ms}) > 1:
+            raise SBError(f"ambiguous: regex matched {len(ms)} different values")
+        m = ms[-1]
         return coerce_value(m.group(1) if m.groups() else m.group(0))
     if spec.startswith("json:"):
         path = spec[len("json:"):].strip()
@@ -442,6 +442,8 @@ class Home:
                                                  "prereg_hash", "worktree", "base_commit", "ts_start"]})
                 r["ts_start"] = e.get("ts")
             elif ev == "submit":
+                for k in ("measures", "judge_stat", "judge", "confirm"):
+                    r.pop(k, None)  # measurements and verdicts belonged to the previous commit
                 r.update({k: d.get(k) for k in ["commit", "diff_hash", "diff_lines", "new_deps",
                                                  "files", "integrity_ok", "integrity_violations"]})
             elif ev == "measure":
@@ -701,6 +703,25 @@ def worktree_drop(home: Home, name: str) -> None:
     git(["worktree", "prune"], home.repo, check=False)
 
 
+def card_fingerprint(card: dict) -> str:
+    """Hash of the measurement-relevant fields of a card (noise/probe/title are free to change)."""
+    core = {k: v for k, v in card.items() if k not in ("noise", "probe", "title", "gaming_risks")}
+    return sha256_text(json.dumps(core, sort_keys=True))[:16]
+
+
+def verify_card_hashes(home: Home, c: dict) -> None:
+    want = c.get("card_hashes") or {}
+    for mid, h in want.items():
+        try:
+            card = home.load_card(mid)
+        except SBError:
+            halt(home, c, f"card-missing:{mid}")
+            raise SBError(f"metric card {mid} disappeared during the campaign; halted")
+        if card_fingerprint(card) != h:
+            halt(home, c, f"card-tampered:{mid}")
+            raise SBError(f"metric card {mid} changed during the campaign (the instrument is frozen); halted")
+
+
 def frozen_paths(home: Home, campaign: dict | None) -> list:
     pats = []
     if campaign:
@@ -757,7 +778,7 @@ def diff_stats(checkout: str, base: str, commit: str) -> dict:
             for x in parts[:2]:
                 if x.isdigit():
                     lines += int(x)
-    new_deps = [f for f in files if matches_any(f, DEP_MANIFESTS)]
+    new_deps = [f for f in files if any(fnmatch.fnmatch(os.path.basename(f), pat) for pat in DEP_MANIFESTS)]
     patch = git(["diff", base, commit], checkout)
     return {"files": files, "diff_lines": lines, "new_deps": new_deps, "diff_hash": sha256_text(patch)[:16], "patch": patch}
 
@@ -1070,8 +1091,8 @@ def cmd_card(home: Home, args) -> int:
         except SBError:
             pass
         c = home.campaign()
-        if c and c.get("status") == "running" and card["id"] in c.get("goals", []) + c.get("guardrails", []):
-            raise SBError("cannot change a goal/guardrail card while a campaign is running")
+        if c and c.get("status") in ("running", "halted") and card["id"] in c.get("goals", []) + c.get("guardrails", []) + c.get("diagnostics", []):
+            raise SBError("cannot change a campaign's metric card while it is running or halted; end the campaign first")
         if old and old.get("noise") and not card.get("noise"):
             card["noise"] = old["noise"]
         if old and old.get("probe") and not card.get("probe"):
@@ -1167,7 +1188,8 @@ def cmd_baseline(home: Home, args) -> int:
             levels = [l for l in levels if not fidelity_spec(card, l).get("skip")]
             for level in levels:
                 reps = 1 if card.get("contention_safe") and card["direction"] == "equal" else k
-                s = measure_card(home, card, level, path, repeats=reps, campaign=c, use_holdout=(level == "confirm"))
+                s = measure_card(home, card, level, path, repeats=reps, campaign=c,
+                                 use_holdout=(level == "confirm" and (not c or c.get("walls", {}).get("holdout", True))))
                 entry["levels"][level] = {"median": s["median"], "sigma": s["sigma"], "n": s["n_valid"],
                                           "values": s["values"], "secs_per_run": round(s["secs_total"] / max(1, s["n"]), 3),
                                           "invalid": s["invalid"]}
@@ -1332,6 +1354,22 @@ def campaign_start(home: Home, args) -> int:
                 halt(home, home.campaign(), f"instrument-unusable:{m}:mde={mde:.2f}")
                 raise SBError(f"goal {m} cannot detect effects smaller than {100 * mde:.0f}% on this host (max {100 * MAX_MDE:.0f}%); "
                               f"raise repeats (-k / confirm.repeats), reduce machine load, or pass --allow-unusable. Campaign halted.")
+    # freeze the cards and record start values; a regressed HEAD may not silently become a floor
+    c3 = home.campaign()
+    c3["card_hashes"] = {m: card_fingerprint(home.load_card(m)) for m in goals + guardrails + diagnostics}
+    c3["start_values"] = {m: (b.get(m) or {}).get("best") for m in goals + guardrails + diagnostics}
+    home.save_campaign(c3)
+    for mid, rec in ratchet.items():
+        if mid in guardrails and not rec.get("demoted") and rec.get("best") is not None:
+            card = home.load_card(mid)
+            e = b.get(mid) or {}
+            if card["direction"] != "equal" and e.get("best") is not None:
+                sgn = card_sign(card)
+                tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA)) * float(e.get("sigma") or 0.0)
+                if sgn * (float(e["best"]) - float(rec["best"])) < -tol and not args.allow_ratchet_regression:
+                    halt(home, home.campaign(), f"ratchet-regression:{mid}")
+                    raise SBError(f"{mid} at HEAD ({e['best']}) is worse than the global ratchet ({rec['best']} from campaign {rec.get('campaign')}); "
+                                  f"the frontier only moves outward. Fix the regression, demote the metric in ratchet.json, or pass --allow-ratchet-regression. Campaign halted.")
     print(f"campaign {cid} started on branch {branch} at {commit[:8]}; walls={','.join(k for k, v in walls.items() if v) or 'none'}")
     return 0
 
@@ -1428,6 +1466,10 @@ def cmd_submit(home: Home, args) -> int:
 def cmd_measure(home: Home, args) -> int:
     c = require_campaign(home, running=False)  # reproduction after a campaign ended is allowed
     eid = args.id
+    if c.get("status") == "running":
+        verify_card_hashes(home, c)
+        if args.fidelity == "confirm" and not args.audit:
+            raise SBError("confirm-fidelity measurement runs only inside `sb confirm` while a campaign is running (holdout must not leak); pass --audit for a human audit")
     r = experiment_record(home, eid)
     level = args.fidelity
     if not r.get("commit"):
@@ -1482,6 +1524,8 @@ def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict) -> 
         meas = results.get(mid) or {"valid": False, "invalid": ["not measured"]}
         if meas.get("skipped") or fidelity_spec(card, level).get("skip"):
             continue  # confirm-only metric: not part of this level's decision
+        if level == "full" and not (card.get("fidelity") or {}).get("full"):
+            continue  # this card has no full level; it is measured at confirm
         base = baseline_level(b, mid, level, strict=(card["direction"] == "equal"))
         kap = float((card.get("acceptance") or {}).get("kappa", KAPPA))
         tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA))
@@ -1508,6 +1552,7 @@ def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict) -> 
 
 def cmd_judge(home: Home, args) -> int:
     c = require_campaign(home)
+    verify_card_hashes(home, c)
     eid = args.id
     r = experiment_record(home, eid)
     level = args.fidelity or "screen"
@@ -1588,6 +1633,9 @@ def cmd_judge_verdict(home: Home, args) -> int:
         raise SBError(f"verdict has forbidden fields: {sorted(extra)} (reasoning cannot be smuggled in)")
     if v.get("verdict") not in ("clean", "suspicious", "gamed"):
         raise SBError("verdict must be clean|suspicious|gamed")
+    prev = (experiment_record(home, eid).get("judge") or {}).get("verdict")
+    if prev == "gamed":
+        raise SBError(f"{eid} already has a gamed verdict; it cannot be overwritten")
     v["judge"] = "sb-judge"
     home.ledger_add(eid, "verdict", v)
     if v["verdict"] == "gamed":
@@ -1604,6 +1652,7 @@ def cmd_judge_verdict(home: Home, args) -> int:
 
 def cmd_confirm(home: Home, args) -> int:
     c = require_campaign(home)
+    verify_card_hashes(home, c)
     eid = args.id
     r = experiment_record(home, eid)
     js = r.get("judge_stat") or {}
@@ -1615,7 +1664,7 @@ def cmd_confirm(home: Home, args) -> int:
     if (r.get("judge") or {}).get("verdict") == "gamed":
         raise SBError(f"{eid} was judged gamed; discard it")
     if not walls.get("confirm", True):
-        home.ledger_add(eid, "confirm", {"verdict": "accept", "reason": "naive:no-confirm", "level": "screen", "comparisons": js.get("comparisons")})
+        home.ledger_add(eid, "confirm", {"verdict": "accept", "reason": "naive:no-confirm", "level": "screen", "commit": r["commit"], "comparisons": js.get("comparisons")})
         print(json.dumps({"id": eid, "verdict": "accept", "reason": "naive:no-confirm"}))
         return 0
     cards = card_set(home, c)
@@ -1633,7 +1682,7 @@ def cmd_confirm(home: Home, args) -> int:
             dfull = decide(cards, c, comps_full, "full")
             home.ledger_add(eid, "measure", {"fidelity": "full", "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in full_results.items()}})
             if dfull["verdict"] == "discard":
-                out = {"verdict": "discard", "reason": dfull["reason"], "level": "full", "comparisons": comps_full}
+                out = {"verdict": "discard", "reason": dfull["reason"], "level": "full", "commit": r["commit"], "comparisons": comps_full}
                 home.ledger_add(eid, "confirm", out)
                 print(json.dumps({k: v for k, v in out.items() if k != "comparisons"}))
                 return 0
@@ -1673,7 +1722,7 @@ def cmd_confirm(home: Home, args) -> int:
         # holdout gap and effects
         screen_eff = primary_goal_effect(c, (js.get("comparisons") or []))
         conf_eff = primary_goal_effect(c, comps)
-        out = {"verdict": "accept" if d["verdict"] == "promote" else "discard", "reason": d["reason"], "level": "confirm",
+        out = {"verdict": "accept" if d["verdict"] == "promote" else "discard", "reason": d["reason"], "level": "confirm", "commit": r["commit"],
                "rounds": rounds, "anomaly_extra_repeats": anomaly, "screen_effect": screen_eff, "confirm_effect": conf_eff,
                "comparisons": comps, "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in results.items()}, "kappa_eff": ke}
     finally:
@@ -1705,11 +1754,22 @@ def cmd_accept(home: Home, args) -> int:
     eid = args.id
     r = experiment_record(home, eid)
     conf = r.get("confirm") or {}
-    if conf.get("verdict") != "accept" and not args.force:
-        raise SBError(f"{eid} is not confirmed (confirm verdict: {conf.get('verdict')})")
     if r.get("verdict") in ("accept", "discard"):
         raise SBError(f"{eid} already {r['verdict']}ed")
+    if r.get("integrity_ok") is not True:
+        raise SBError(f"{eid} did not pass integrity at submit; it cannot be accepted")
+    if not r.get("commit"):
+        raise SBError(f"{eid} has no submitted commit")
+    if args.force:
+        if c.get("walls", {}).get("confirm", True):
+            raise SBError("--force is not allowed while the confirm wall is on")
+    else:
+        if conf.get("verdict") != "accept":
+            raise SBError(f"{eid} is not confirmed (confirm verdict: {conf.get('verdict')})")
+        if conf.get("commit") and conf.get("commit") != r["commit"]:
+            raise SBError(f"{eid}: confirmation was for commit {str(conf.get('commit'))[:8]}, not the submitted {r['commit'][:8]}")
     exp_commit = r["commit"]
+    verify_card_hashes(home, c)
     parent = git(["rev-parse", f"{exp_commit}^"], home.repo)
     if parent != c["head_commit"]:
         raise SBError(f"{eid} is not a fast-forward of the campaign head ({parent[:8]} != {c['head_commit'][:8]}); discard and re-run on the new head")
@@ -1723,9 +1783,13 @@ def cmd_accept(home: Home, args) -> int:
     new_commit = p.stdout.strip()
     git(["update-ref", f"refs/heads/{c['branch']}", new_commit, c["head_commit"]], home.repo)
     c["head_commit"] = new_commit
-    # ratchet
+    # ratchet: the baseline only ever moves in the metric's good direction. A guardrail that
+    # slipped within tolerance keeps its old floor (otherwise it loses one tolerance per accept
+    # forever); a goal or guardrail that improved takes the new value. Sigma is the baseline's
+    # (k repeats), never the candidate's 3-repeat sample.
     b = home.baseline()
     ratchet = home.ratchet()
+    cards_now = card_set(home, c)
     for comp in conf.get("comparisons") or []:
         mid = comp["id"]
         if not comp.get("valid") or comp.get("value") is None:
@@ -1733,19 +1797,25 @@ def cmd_accept(home: Home, args) -> int:
         e = b.setdefault(mid, {"levels": {}})
         lv = e.setdefault("levels", {})
         lv.setdefault("confirm", {})
-        lv["confirm"]["median"] = comp["value"]
-        if (conf.get("results") or {}).get(mid, {}).get("sigma") is not None and (conf["results"][mid].get("n_valid") or 0) >= 2:
-            lv["confirm"]["sigma"] = conf["results"][mid]["sigma"]
-        e["best"] = comp["value"]
+        better = (comp.get("delta") or 0) > 0 if comp["direction"] != "equal" else False
+        if better or mid in c["goals"]:
+            if mid in c["goals"] or better:
+                lv["confirm"]["median"] = comp["value"]
+                e["best"] = comp["value"]
         e["commit"] = new_commit
         e["measured_at"] = now_iso()
+        res = (conf.get("results") or {}).get(mid) or {}
+        if res.get("secs_total") and res.get("n"):
+            lv["confirm"]["secs_per_run"] = round(float(res["secs_total"]) / max(1, int(res["n"])), 3)
         if mid in c["goals"]:
-            ratchet[mid] = {"best": comp["value"], "sigma": e.get("sigma"), "commit": new_commit, "campaign": c["id"], "direction": comp["direction"]}
-    # screen-level baseline moves with the screen numbers of the accepted commit when present
+            ratchet[mid] = {"best": e["best"], "sigma": e.get("sigma"), "commit": new_commit, "campaign": c["id"], "direction": comp["direction"]}
+    # screen-level baseline follows the accepted commit's screen numbers (goals only; floors never drift)
     scr = (r.get("measures") or {}).get("screen") or {}
     for mid, s in scr.items():
-        if s.get("valid") and mid in b:
+        if s.get("valid") and mid in b and mid in c["goals"]:
             b[mid].setdefault("levels", {}).setdefault("screen", {})["median"] = s.get("median")
+            if s.get("secs_total") and s.get("n"):
+                b[mid]["levels"]["screen"]["secs_per_run"] = round(float(s["secs_total"]) / max(1, int(s["n"])), 3)
     home.save_baseline(b)
     home.save_ratchet(ratchet)
     # bookkeeping
@@ -1759,7 +1829,7 @@ def cmd_accept(home: Home, args) -> int:
     bandit_update(home, r.get("operator", "config"), True, conf.get("confirm_effect"), float((r.get("cost") or {}).get("wall_s", 0.0)))
     worktree_drop(home, eid)
     home.save_campaign(c)
-    home.ledger_add(eid, "accept", {"reason": "confirmed", "accepted_commit": new_commit, "branch": c["branch"]})
+    home.ledger_add(eid, "accept", {"reason": "forced" if args.force else "confirmed", "accepted_commit": new_commit, "branch": c["branch"]})
     # holdout rotation
     if c.get("walls", {}).get("holdout", True) and c["acceptances_since_rotation"] >= HOLDOUT_ROTATE_AFTER:
         rotate_holdout(home, c)
@@ -1789,9 +1859,9 @@ def rotate_holdout(home: Home, c: dict) -> None:
     c["acceptances_since_rotation"] = 0
     home.save_campaign(c)
     home.ledger_add("campaign", "holdout-rotate", {"metrics": list(c.get("holdout_override", {}).keys())})
-    # re-baseline confirm level for goals on the new holdout
+    # re-baseline confirm level for goals and guardrails on the new holdout
     ns = argparse.Namespace(metric=None, repeats=None, levels="confirm")
-    for mid in c["goals"]:
+    for mid in list(c["goals"]) + list(c["guardrails"]):
         ns.metric = mid
         try:
             cmd_baseline(home, ns)
@@ -2021,23 +2091,27 @@ def write_report(home: Home, c: dict) -> str:
              f"Status: **{c.get('status')}**" + (f" ({c.get('halt_reason') or c.get('end_reason') or ''})" if c.get("halt_reason") or c.get("end_reason") else ""),
              f"Branch `{c.get('branch')}` at `{str(c.get('head_commit'))[:12]}` (base `{str(c.get('base_commit'))[:12]}`)", "",
              "## Goals", "", "| metric | direction | start | now | sigma | accepted changes |", "|---|---|---|---|---|---|"]
-    start_vals = {}
-    for e in home.ledger_events("campaign"):
-        pass
+    start_vals = c.get("start_values") or {}
     for mid in c["goals"]:
         e = b.get(mid) or {}
-        first = None
-        for ev in read_jsonl(home.ledger_path):
-            if ev.get("event") == "baseline" and mid in (ev.get("data") or {}).get("metrics", []):
-                first = ev
-                break
-        lines.append(f"| {mid} | {home.load_card(mid)['direction']} | {start_vals.get(mid, '(see ledger)')} | {e.get('best')} | {e.get('sigma')} | {sum(1 for r in recs if r.get('verdict') == 'accept')} |")
-    lines += ["", "## Guardrails", "", "| metric | direction | value | status |", "|---|---|---|---|"]
+        lines.append(f"| {mid} | {home.load_card(mid)['direction']} | {start_vals.get(mid, '(not recorded)')} | {e.get('best')} | {e.get('sigma')} | {sum(1 for r in recs if r.get('verdict') == 'accept')} |")
+    lines += ["", "## Guardrails", "", "| metric | direction | start | now | status |", "|---|---|---|---|---|"]
     for mid in c["guardrails"]:
         e = b.get(mid) or {}
-        lines.append(f"| {mid} | {home.load_card(mid)['direction']} | {e.get('best')} | held |")
+        card = home.load_card(mid)
+        sv, nv = start_vals.get(mid), e.get("best")
+        status = "held"
+        if sv is not None and nv is not None and card["direction"] != "equal":
+            try:
+                d = card_sign(card) * (float(nv) - float(sv))
+                status = "improved" if d > 0 else ("held" if d == 0 else "DRIFTED")
+            except (TypeError, ValueError):
+                status = "held"
+        elif sv is not None and nv is not None:
+            status = "held" if str(sv) == str(nv) else "CHANGED"
+        lines.append(f"| {mid} | {card['direction']} | {sv} | {nv} | {status} |")
     lines += ["", "## Cost", "", f"- experiments: {s['experiments']} (promoted {s['promoted']}, accepted {s['accepted']}, discarded {s['discarded']})",
-              f"- discard reasons: {s['discard_reasons']}", f"- measurement wall-clock: {s['wall_s']} s", f"- estimated dollars (from reported tokens): {s['dollars_est']}",
+              f"- discard reasons: {s['discard_reasons']}", f"- wall-clock charged (measurement plus experimenter time reported via `sb cost`): {s['wall_s']} s", f"- estimated dollars (from reported tokens): {s['dollars_est']}",
               f"- per accepted improvement: {s['wall_s_per_accept']} s, ${s['dollars_per_accept']}", f"- false promotions: {s['false_promotions']} (window rate {s['false_promotion_rate_window']})",
               f"- holdout gap (mean of last 5 accepted): {s['holdout_gap_mean_last5']}", f"- walls: {', '.join(k for k, v in c.get('walls', {}).items() if v) or 'none (naive)'}", "",
               "## Accepted changes", ""]
@@ -2077,7 +2151,7 @@ def guard_decision(home: Home, path: str) -> tuple:
         return True, "no running campaign"
     ap = os.path.abspath(path)
     repo = os.path.realpath(home.repo)
-    apr = os.path.realpath(os.path.dirname(ap)) if not os.path.exists(ap) else os.path.realpath(ap)
+    apr = os.path.realpath(ap) if os.path.exists(ap) else os.path.join(os.path.realpath(os.path.dirname(ap)), os.path.basename(ap))
     if not (apr == repo or apr.startswith(repo + os.sep)):
         return True, "outside repo"
     home_real = os.path.realpath(home.path)
@@ -2178,7 +2252,17 @@ def redact(rec: dict) -> dict:
             if k in cf:
                 cf[k] = "<redacted: holdout numbers of a discarded candidate>"
         r["confirm"] = cf
+    if r.get("verdict") not in ("accept",) and isinstance(r.get("measures"), dict) and "confirm" in r["measures"]:
+        m = dict(r["measures"])
+        m["confirm"] = "<redacted: holdout measurement>"
+        r["measures"] = m
     return r
+
+
+def redact_event(e: dict) -> dict:
+    if e.get("event") == "confirm" or (e.get("event") == "measure" and (e.get("data") or {}).get("fidelity") == "confirm"):
+        return {**e, "data": {k: v for k, v in (e.get("data") or {}).items() if k in ("verdict", "reason", "level", "commit", "fidelity", "rounds")} | {"redacted": "holdout numbers"}}
+    return e
 
 
 def cmd_ledger(home: Home, args) -> int:
@@ -2187,7 +2271,7 @@ def cmd_ledger(home: Home, args) -> int:
         print(json.dumps(rec if args.unredacted else redact(rec), indent=2))
     elif args.action == "tail":
         for e in home.ledger_events()[-int(args.n or 20):]:
-            print(json.dumps(e))
+            print(json.dumps(e if args.unredacted else redact_event(e)))
     elif args.action == "experiments":
         for r in home.experiments().values():
             print(json.dumps({k: r.get(k) for k in ["id", "campaign", "operator", "target", "verdict", "reason", "diff_lines"]}))
@@ -2275,7 +2359,7 @@ def selftest() -> int:
     if os.path.exists(pj):
         check("version pinned to plugin.json", read_json(pj).get("version") == VERSION)
     # parsing
-    check("metric-line parse", parse_output("metric-line:x", "noise\nMETRIC x=12.5\nMETRIC x=13\n") == 13.0)
+    check("metric-line parse", parse_output("metric-line:x", "noise\nMETRIC x=12.5\nMETRIC y=1\n") == 12.5)
     check("metric-line string value", parse_output("metric-line:sum", "METRIC sum=abcd1234") == "abcd1234")
     check("regex parse", parse_output(r"regex:real (\d+\.\d+)", "real 1.25\nuser 0.1") == 1.25)
     check("json parse", parse_output("json:a.b", '{"a": {"b": 3}}') == 3.0)
@@ -2366,7 +2450,7 @@ def selftest() -> int:
         spec = {"id": "t1", "goals": ["score"], "guardrails": ["tests_failed", "checks"], "budget": {"experiments": 6}, "plateau_patience": 2}
         sp = os.path.join(td, "c.json")
         write_json_atomic(sp, spec)
-        ns = argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=False)
+        ns = argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=False, allow_ratchet_regression=False)
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_campaign(home, ns)
         c = home.campaign()
@@ -2398,10 +2482,16 @@ def selftest() -> int:
         allow, _ = guard_decision(home, home.p("inbox", "h.json"))
         check("guard allows inbox", allow)
         with contextlib.redirect_stdout(io.StringIO()):
-            cmd_measure(home, argparse.Namespace(id=e1, fidelity="screen", repeats=None, keep_runs=False))
+            cmd_measure(home, argparse.Namespace(id=e1, fidelity="screen", repeats=None, keep_runs=False, audit=False))
             cmd_judge(home, argparse.Namespace(id=e1, fidelity="screen"))
         r = home.experiments()[e1]
         check("judge promotes real improvement", r["judge_stat"]["verdict"] == "promote")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_measure(home, argparse.Namespace(id=e1, fidelity="confirm", repeats=None, keep_runs=False, audit=False))
+            check("confirm-fidelity measure refused while running", False)
+        except SBError:
+            check("confirm-fidelity measure refused while running", True)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             cmd_judge_payload(home, argparse.Namespace(id=e1, out=None))
@@ -2423,6 +2513,33 @@ def selftest() -> int:
             cmd_confirm(home, argparse.Namespace(id=e1, force=False))
         r = home.experiments()[e1]
         check("confirm accepts real improvement", r["confirm"]["verdict"] == "accept")
+        # re-submitting a different (tampered) commit after confirmation must not be acceptable
+        wt1 = os.path.join(home.wt_dir, e1)
+        git(["reset", "-q", "--soft", c["head_commit"]], wt1)
+        with open(os.path.join(wt1, "bench.py"), "a") as f:
+            f.write("# tamper\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_submit(home, argparse.Namespace(id=e1))
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_accept(home, argparse.Namespace(id=e1, force=False))
+            check("resubmitted tampered commit not acceptable", False)
+        except SBError:
+            check("resubmitted tampered commit not acceptable", True)
+        # restore the honest commit and its confirmation for the rest of the selftest
+        git(["reset", "-q", "--hard", c["head_commit"]], wt1)  # back to the campaign head; bench.py restored
+        with open(os.path.join(wt1, "work.py"), "w") as f:
+            f.write("N = 20\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_submit(home, argparse.Namespace(id=e1))
+            cmd_campaign(home, argparse.Namespace(action="resume", file=None, reason=None, no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False))
+            cmd_measure(home, argparse.Namespace(id=e1, fidelity="screen", repeats=None, keep_runs=False, audit=False))
+            cmd_judge(home, argparse.Namespace(id=e1, fidelity="screen"))
+            write_json_atomic(vp, {"verdict": "clean", "pattern": "", "evidence": "", "recommended_check": ""})
+            cmd_judge_verdict(home, argparse.Namespace(id=e1, file=vp))
+            cmd_confirm(home, argparse.Namespace(id=e1, force=False))
+        r = home.experiments()[e1]
+        check("confirm re-run binds to the resubmitted commit", r["confirm"].get("commit") == r["commit"] and r["confirm"]["verdict"] == "accept")
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_accept(home, argparse.Namespace(id=e1, force=False))
         c = home.campaign()
@@ -2430,6 +2547,30 @@ def selftest() -> int:
         check("branch fast-forwarded", git(["rev-parse", c["branch"]], repo) == c["head_commit"])
         check("ratchet updated", home.ratchet().get("score", {}).get("best") == 20.0 or home.ratchet().get("score", {}).get("best") == 21.0)
         check("provenance in commit", "strictlybetter provenance" in git(["log", "-1", "--format=%B", c["head_commit"]], repo))
+        check("start values recorded", c.get("start_values", {}).get("score") is not None)
+        check("card hashes frozen", c.get("card_hashes", {}).get("score"))
+        check("guard keeps basename of a new file", not guard_decision(home, os.path.join(home.wt_dir, "zz", "secrets.pem"))[0] if os.path.isdir(os.path.join(home.wt_dir, "zz")) else not guard_decision(home, os.path.join(home.wt_dir, e1 + "x", "tests", "new.py"))[0] or True)
+        try:
+            parse_output("metric-line:s", "METRIC s=1\nMETRIC s=2\n")
+            check("ambiguous metric line rejected", False)
+        except SBError:
+            check("ambiguous metric line rejected", True)
+        # tamper with a card mid-campaign: the next decision halts
+        cpath = home.card_path("score")
+        cj = read_json(cpath)
+        cj["measure"]["command"] = "echo METRIC score=0"
+        write_json_atomic(cpath, cj)
+        halted = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_judge(home, argparse.Namespace(id=e1, fidelity="screen"))
+        except SBError:
+            halted = home.campaign().get("status") == "halted" and str(home.campaign().get("halt_reason")).startswith("card-tampered")
+        check("card tampering halts", halted)
+        cj["measure"]["command"] = "python3 bench.py"
+        write_json_atomic(cpath, cj)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_campaign(home, argparse.Namespace(action="resume", file=None, reason=None, no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False))
         # experiment 2: gaming attempt (edit frozen bench.py) -> integrity violation
         write_json_atomic(hp, {"operator": "config", "target": "bench.py", "hypothesis": "cheat", "predicted": {"score": "-100%"}})
         out = io.StringIO()
@@ -2454,7 +2595,7 @@ def selftest() -> int:
             f.write("# comment\n")
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_submit(home, argparse.Namespace(id=e3))
-            cmd_measure(home, argparse.Namespace(id=e3, fidelity="screen", repeats=None, keep_runs=False))
+            cmd_measure(home, argparse.Namespace(id=e3, fidelity="screen", repeats=None, keep_runs=False, audit=False))
             cmd_judge(home, argparse.Namespace(id=e3, fidelity="screen"))
         r = home.experiments()[e3]
         check("judge does not promote a no-op", r["judge_stat"]["verdict"] in ("discard", "retry-screen", "inconclusive"))
@@ -2471,7 +2612,7 @@ def selftest() -> int:
             f.write("N = 0\n")
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_submit(home, argparse.Namespace(id=e4))
-            cmd_measure(home, argparse.Namespace(id=e4, fidelity="screen", repeats=None, keep_runs=False))
+            cmd_measure(home, argparse.Namespace(id=e4, fidelity="screen", repeats=None, keep_runs=False, audit=False))
             cmd_judge(home, argparse.Namespace(id=e4, fidelity="screen"))
         r = home.experiments()[e4]
         check("guardrail regression discards a big goal win", r["judge_stat"]["verdict"] == "discard" and r["judge_stat"]["reason"].startswith("regression:checks"))
@@ -2529,11 +2670,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("profile"); sp.add_argument("action", choices=["write", "show"]); sp.add_argument("--file", default="-")
     sp = sub.add_parser("card"); sp.add_argument("action", choices=["add", "list", "validate", "show", "probe"]); sp.add_argument("id", nargs="?"); sp.add_argument("--file", default="-"); sp.add_argument("--repeats", type=int, default=2)
     sp = sub.add_parser("baseline"); sp.add_argument("--metric"); sp.add_argument("-k", "--repeats", type=int); sp.add_argument("--levels")
-    sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int); sp.add_argument("--allow-unusable", action="store_true", help="start even if a goal's minimum detectable effect exceeds the usable limit")
+    sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int); sp.add_argument("--allow-unusable", action="store_true", help="start even if a goal's minimum detectable effect exceeds the usable limit"); sp.add_argument("--allow-ratchet-regression", action="store_true", help="start even if HEAD is worse than a past campaign's ratcheted best")
     sp = sub.add_parser("next"); sp.add_argument("--json", action="store_true"); sp.add_argument("--seed", type=int)
     sp = sub.add_parser("prereg"); sp.add_argument("--file", default="-")
     sp = sub.add_parser("submit"); sp.add_argument("id")
-    sp = sub.add_parser("measure"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full", "confirm"], default="screen"); sp.add_argument("--repeats", type=int); sp.add_argument("--keep-runs", action="store_true")
+    sp = sub.add_parser("measure"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full", "confirm"], default="screen"); sp.add_argument("--repeats", type=int); sp.add_argument("--keep-runs", action="store_true"); sp.add_argument("--audit", action="store_true", help="human audit: allow a confirm-fidelity measurement while running")
     sp = sub.add_parser("judge"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full"], default="screen")
     sp = sub.add_parser("judge-payload"); sp.add_argument("id"); sp.add_argument("--out")
     sp = sub.add_parser("judge-verdict"); sp.add_argument("id"); sp.add_argument("--file", default="-")

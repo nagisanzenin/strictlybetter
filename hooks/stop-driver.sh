@@ -24,8 +24,17 @@ fi
 [ -f "$ROOT/scripts/sb.py" ] || exit 0
 PROJ="${CLAUDE_PROJECT_DIR:-$PWD}"
 [ -d "$PROJ" ] || exit 0
-# Fast path: nothing to drive without a campaign file.
-if [ -z "${SB_HOME:-}" ] && [ ! -f "$PROJ/.strictlybetter/campaign.json" ]; then exit 0; fi
+# Fast path: nothing to drive without a campaign file. Walk up to six levels so a session
+# opened in a monorepo subdirectory is still driven (same rule as the guard).
+if [ -z "${SB_HOME:-}" ]; then
+  D="$PROJ"; i=0; FOUND=""
+  while [ "$i" -le 6 ] && [ -n "$D" ] && [ "$D" != "/" ]; do
+    if [ -f "$D/.strictlybetter/campaign.json" ]; then FOUND="$D"; break; fi
+    D="$(dirname -- "$D")"; i=$((i + 1))
+  done
+  [ -n "$FOUND" ] || exit 0
+  PROJ="$FOUND"
+fi
 PROG="$(cat <<'PY'
 import json, os, re, subprocess, sys
 def main():

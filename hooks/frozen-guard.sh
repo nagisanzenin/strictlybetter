@@ -42,11 +42,24 @@ ROOT="${ZCODE_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}}"
 if [ -z "$ROOT" ] || [ ! -f "$ROOT/scripts/sb.py" ]; then
   ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)"
 fi
-[ -f "$ROOT/scripts/sb.py" ] || exit 0
+if [ ! -f "$ROOT/scripts/sb.py" ]; then
+  # A campaign exists here but the engine cannot be found: deny rather than let a frozen
+  # edit through unchecked (the one place this hook fails closed; set SB_GUARD=off to bypass).
+  [ "${SB_GUARD:-on}" = "off" ] && exit 0
+  echo "strictlybetter guard: a campaign is present but the engine (scripts/sb.py) was not found; edit denied. Set SB_GUARD=off to bypass." >&2
+  exit 2
+fi
 ERR="$(printf '%s' "$PAYLOAD" | python3 "$ROOT/scripts/sb.py" --repo "$REPO" guard --stdin 2>&1 >/dev/null)"
 RC=$?
 if [ "$RC" -eq 2 ]; then
   printf '%s\n' "${ERR:-strictlybetter guard: denied}" | tr -d '\000-\010\013-\037' | head -n 3 >&2
+  exit 2
+fi
+if [ "$RC" -ne 0 ]; then
+  # The engine crashed or refused (corrupt state, bad payload): with a campaign present this
+  # is a deny, not a pass. Corrupt state is exactly when an unchecked edit is most dangerous.
+  [ "${SB_GUARD:-on}" = "off" ] && exit 0
+  printf '%s\n' "strictlybetter guard: engine error (rc=$RC), edit denied while a campaign is present: ${ERR:-no detail}" | tr -d '\000-\010\013-\037' | head -n 3 >&2
   exit 2
 fi
 exit 0
