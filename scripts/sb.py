@@ -426,6 +426,8 @@ class Home:
         if not c:
             return None
         for k in ("goals", "guardrails", "diagnostics", "accepted_ids"):
+            if k not in c or c[k] is None:
+                c[k] = []
             if not isinstance(c.get(k, []), list):
                 raise SBError(f"corrupt campaign.json: {k} is not a list")
             if any(not isinstance(x, str) for x in c.get(k, [])):
@@ -2556,9 +2558,9 @@ def cmd_next(home: Home, args) -> int:
     b = home.baseline()
     recs = [r for r in home.experiments().values() if r.get("campaign") == c["id"]]
     open_ids = [r["id"] for r in recs if r.get("verdict") not in ("accept", "discard")]
-    dead = [{"id": r["id"], "operator": r.get("operator"), "target": r.get("target"), "reason": r.get("reason"), "hypothesis": (r.get("hypothesis") or "")[:120]}
+    dead = [{"id": r["id"], "operator": str(r.get("operator") or "?"), "target": str(r.get("target") or "?"), "reason": str(r.get("reason") or "?"), "hypothesis": str(r.get("hypothesis") or "")[:120]}
             for r in recs if r.get("verdict") == "discard"][-12:]
-    wins = [{"id": r["id"], "operator": r.get("operator"), "target": r.get("target"), "effect": (r.get("confirm") or {}).get("confirm_effect"), "hypothesis": (r.get("hypothesis") or "")[:120]}
+    wins = [{"id": r["id"], "operator": str(r.get("operator") or "?"), "target": str(r.get("target") or "?"), "effect": (r.get("confirm") or {}).get("confirm_effect") if isinstance(r.get("confirm"), dict) else None, "hypothesis": str(r.get("hypothesis") or "")[:120]}
             for r in recs if r.get("verdict") == "accept"]
     archive = []
     if os.path.isdir(home.p("archive")):
@@ -3110,7 +3112,7 @@ def selftest() -> int:
             with contextlib.redirect_stdout(io.StringIO()):
                 cmd_campaign(home2, argparse.Namespace(action="start", file=sp2, no_baseline=False, repeats=1, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
         except SBError:
-            halted_ns = (home2.campaign() or {}).get("status") == "halted"
+            halted_ns = "no measured sigma" in str((home2.campaign() or {}).get("halt_reason", ""))
         check("goal without measured sigma halts at start", halted_ns)
         # a goal whose targets are all frozen halts at start unless marked control (issue #3)
         home3 = Home(repo=repo, home=os.path.join(td, "home3"))
