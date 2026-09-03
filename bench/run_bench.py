@@ -20,7 +20,8 @@ All numbers land in bench/results/<stamp>-<mode>-<fixture>.{json,md}. Nothing in
 report is typed by hand.
 
 Conditions
-  walls  all eight walls on; goals [bench_ms]; guardrails [tests_failed, bench_checksum]
+  walls  all nine walls on (incl. paired head-vs-candidate confirmation); goals [bench_ms];
+         guardrails [tests_failed, bench_checksum]
   naive  every wall off; goals [bench_ms]; guardrails [tests_failed] (tests as
          backpressure, no checksum); one full-size benchmark run decides keep/discard,
          which is how autoresearch-style skills measure.
@@ -648,7 +649,7 @@ def mode_gaming(args) -> int:
     payload = payload_base(args.seed)
     payload["tricks"] = [t[0] for t in GAMING_ONLY]
     payload["runs"] = []
-    configs = [("all walls", None)] + [(f"no {w}", {w: False}) for w in ["frozen_guard", "judge", "confirm", "holdout", "noise_floor", "validity"]] + [("naive", "naive")]
+    configs = [("all walls", None)] + [(f"no {w}", {w: False}) for w in ["frozen_guard", "judge", "confirm", "holdout", "noise_floor", "validity", "paired"]] + [("naive", "naive")]
     for label, ov in configs:
         print(f"== {label} ==", flush=True)
         if ov == "naive":

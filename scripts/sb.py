@@ -96,7 +96,7 @@ DEP_MANIFESTS = ["requirements.txt", "requirements-*.txt", "pyproject.toml", "se
 DEFAULT_PROTECTED = [".github/", ".gitlab-ci.yml", ".env", ".env.*", "*.pem", "*.key",
                      "secrets/", "LICENSE", "LICENSE.*"]
 WALL_KEYS = ["validity", "noise_floor", "confirm", "holdout", "frozen_guard", "judge",
-             "prereg", "anomaly_breaker"]
+             "prereg", "anomaly_breaker", "paired"]
 DISCARD_REASONS = ["noise", "regression", "integrity", "gamed", "build-failed", "timeout",
                    "budget", "invalid", "harness-error", "manual"]
 
@@ -579,6 +579,56 @@ def services_up(svc: dict | None, checkout: str, label: str):
     finally:
         if svc.get("teardown"):
             run_cmd(svc["teardown"], cwd=cwd, env=env, timeout=float(svc.get("teardown_timeout_s", 300)))
+
+
+def measure_paired(home: Home, card: dict, level: str, cand: str, head: str, repeats: int,
+                   campaign: dict | None, use_holdout: bool) -> tuple:
+    """Measure the candidate and the campaign HEAD interleaved (ABBA per repeat, same holdout value
+    on both sides), so a load burst or a thermal change hits both alike. Returns (candidate summary,
+    head summary). This is how performance CI compares (a fresh baseline in the same job), and it
+    is what removes time drift between the stored baseline and the moment of confirmation."""
+    hvals = holdout_values(card, level, campaign) if use_holdout else []
+    spec = fidelity_spec(card, level)
+    ho = spec.get("holdout") or {}
+    if hvals and ho.get("kind") == "dir" and use_holdout:
+        src = home.p("holdout", ho.get("name", card["id"]))
+        if os.path.isdir(src):
+            for dest in (cand, head):
+                shutil.copytree(src, os.path.join(dest, ho.get("dest", ho.get("name", card["id"]))), dirs_exist_ok=True)
+    if card.get("direction") == "equal" and hvals:
+        repeats = len(hvals)
+    if not card.get("reuse_output"):
+        _OUTPUT_CACHE.clear()
+    runs_c, runs_h = [], []
+    with measurement_lock(home, card):
+        for i in range(repeats):
+            hv = hvals[i % len(hvals)] if hvals else None
+            order = [("h", head), ("c", cand)] if i % 2 == 0 else [("c", cand), ("h", head)]
+            for side, path in order:
+                with services_up(card.get("services"), path, f"card {card['id']} services") as (ok, why):
+                    rec = measure_once(card, level, path, holdout_value=hv) if ok else \
+                        {"rc": None, "secs": 0.0, "value": None, "valid": False, "invalid_reason": why, "holdout": hv, "stdout_tail": "", "stderr_tail": ""}
+                (runs_h if side == "h" else runs_c).append(rec)
+    sc = summarize(runs_c, card)
+    sc["runs"] = runs_c
+    sc["fidelity"] = level
+    sh = summarize(runs_h, card)
+    sh["runs"] = runs_h
+    sh["fidelity"] = level
+    return sc, sh
+
+
+def fresh_bases(home: Home, c: dict, level: str, head_results: dict) -> dict:
+    """Baselines for a paired comparison: the head's FRESH median (and n), the stored k-repeat sigma."""
+    b = home.baseline()
+    out = {}
+    for mid, sh in (head_results or {}).items():
+        if not sh or not sh.get("valid"):
+            continue
+        stored = baseline_level(b, mid, level) or {}
+        out[mid] = {"median": sh["median"], "sigma": stored.get("sigma"), "n": sh.get("n_valid") or sh.get("n") or 1,
+                    "secs_per_run": (sh.get("secs_total") or 0) / max(1, sh.get("n") or 1), "fresh": True}
+    return out
 
 
 def invalid_summary(reason: str, level: str) -> dict:
@@ -1638,7 +1688,7 @@ def cmd_measure(home: Home, args) -> int:
     return 0
 
 
-def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict) -> tuple:
+def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict, bases: dict | None = None) -> tuple:
     cards = card_set(home, c)
     b = home.baseline()
     ke = kappa_eff(KAPPA, int(r.get("diff_lines") or 0), len(r.get("new_deps") or []))
@@ -1652,7 +1702,7 @@ def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict) -> 
             continue  # confirm-only metric: not part of this level's decision
         if level == "full" and not (card.get("fidelity") or {}).get("full"):
             continue  # this card has no full level; it is measured at confirm
-        base = baseline_level(b, mid, level, strict=(card["direction"] == "equal"))
+        base = (bases or {}).get(mid) or baseline_level(b, mid, level, strict=(card["direction"] == "equal"))
         kap = float((card.get("acceptance") or {}).get("kappa", KAPPA))
         tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA))
         ke_card = kappa_eff(kap, int(r.get("diff_lines") or 0), len(r.get("new_deps") or [])) if c.get("walls", {}).get("noise_floor", True) else 0.0
@@ -1795,6 +1845,9 @@ def cmd_confirm(home: Home, args) -> int:
         return 0
     cards = card_set(home, c)
     checkout = worktree_new(home, f"{eid}-confirm", r["commit"])
+    paired = bool(walls.get("paired", True))
+    head_checkout = worktree_new(home, f"{eid}-head", c["head_commit"]) if paired else None
+    head_full, head_results = {}, {}
     t0 = time.perf_counter()
     try:
       with services_up(c.get("services"), checkout, "campaign services") as (svc_ok, svc_why):
@@ -1808,9 +1861,13 @@ def cmd_confirm(home: Home, args) -> int:
         for mid in list(c["goals"]) + list(c["guardrails"]):
             card = cards[mid]
             if (card.get("fidelity") or {}).get("full") and not fidelity_spec(card, "full").get("skip"):
-                full_results[mid] = measure_card(home, card, "full", checkout, repeats=fidelity_spec(card, "full")["repeats"], campaign=c, use_holdout=False)
+                if paired:
+                    full_results[mid], head_full[mid] = measure_paired(home, card, "full", checkout, head_checkout, fidelity_spec(card, "full")["repeats"], c, False)
+                else:
+                    full_results[mid] = measure_card(home, card, "full", checkout, repeats=fidelity_spec(card, "full")["repeats"], campaign=c, use_holdout=False)
         if full_results:
-            comps_full, _ = comparisons_for(home, c, r, "full", {**{m: full_results.get(m) or {"valid": False, "invalid": ["not measured"]} for m in full_results}})
+            comps_full, _ = comparisons_for(home, c, r, "full", {**{m: full_results.get(m) or {"valid": False, "invalid": ["not measured"]} for m in full_results}},
+                                            bases=fresh_bases(home, c, "full", head_full) if paired else None)
             dfull = decide(cards, c, comps_full, "full")
             home.ledger_add(eid, "measure", {"fidelity": "full", "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in full_results.items()}})
             if dfull["verdict"] == "discard":
@@ -1827,8 +1884,11 @@ def cmd_confirm(home: Home, args) -> int:
             if spec.get("skip"):
                 continue
             reps = spec["max_repeats"] if anomaly else spec["repeats"]
-            results[mid] = measure_card(home, card, "confirm", checkout, repeats=reps, campaign=c, use_holdout=walls.get("holdout", True))
-        comps, ke = comparisons_for(home, c, r, "confirm", results)
+            if paired:
+                results[mid], head_results[mid] = measure_paired(home, card, "confirm", checkout, head_checkout, reps, c, walls.get("holdout", True))
+            else:
+                results[mid] = measure_card(home, card, "confirm", checkout, repeats=reps, campaign=c, use_holdout=walls.get("holdout", True))
+        comps, ke = comparisons_for(home, c, r, "confirm", results, bases=fresh_bases(home, c, "confirm", head_results) if paired else None)
         d = decide(cards, c, comps, "confirm")
         rounds = 1
         while d["verdict"] == "inconclusive":
@@ -1838,7 +1898,17 @@ def cmd_confirm(home: Home, args) -> int:
                 spec = fidelity_spec(card, "confirm")
                 cur = results[mid]
                 if cur["n"] < spec["max_repeats"]:
-                    more = measure_card(home, card, "confirm", checkout, repeats=min(2, spec["max_repeats"] - cur["n"]), campaign=c, use_holdout=walls.get("holdout", True))
+                    k_more = min(2, spec["max_repeats"] - cur["n"])
+                    if paired:
+                        more, more_h = measure_paired(home, card, "confirm", checkout, head_checkout, k_more, c, walls.get("holdout", True))
+                        hh = head_results.get(mid) or {"runs": []}
+                        merged_h = (hh.get("runs") or []) + (more_h.get("runs") or [])
+                        sh = summarize(merged_h, card)
+                        sh["runs"] = merged_h
+                        sh["fidelity"] = "confirm"
+                        head_results[mid] = sh
+                    else:
+                        more = measure_card(home, card, "confirm", checkout, repeats=k_more, campaign=c, use_holdout=walls.get("holdout", True))
                     merged_runs = (cur.get("runs") or []) + (more.get("runs") or [])
                     s = summarize(merged_runs, card)
                     s["runs"] = merged_runs
@@ -1848,17 +1918,20 @@ def cmd_confirm(home: Home, args) -> int:
             if not grew:
                 d["verdict"], d["reason"] = "discard", "noise"
                 break
-            comps, ke = comparisons_for(home, c, r, "confirm", results)
+            comps, ke = comparisons_for(home, c, r, "confirm", results, bases=fresh_bases(home, c, "confirm", head_results) if paired else None)
             d = decide(cards, c, comps, "confirm")
             rounds += 1
         # holdout gap and effects
         screen_eff = primary_goal_effect(c, (js.get("comparisons") or []))
         conf_eff = primary_goal_effect(c, comps)
         out = {"verdict": "accept" if d["verdict"] == "promote" else "discard", "reason": d["reason"], "level": "confirm", "commit": r["commit"],
-               "rounds": rounds, "anomaly_extra_repeats": anomaly, "screen_effect": screen_eff, "confirm_effect": conf_eff,
-               "comparisons": comps, "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in results.items()}, "kappa_eff": ke}
+               "rounds": rounds, "anomaly_extra_repeats": anomaly, "screen_effect": screen_eff, "confirm_effect": conf_eff, "paired": paired,
+               "comparisons": comps, "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in results.items()},
+               "head_results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in head_results.items()}, "kappa_eff": ke}
     finally:
         worktree_drop(home, f"{eid}-confirm")
+        if head_checkout:
+            worktree_drop(home, f"{eid}-head")
         wall = time.perf_counter() - t0
         add_spend(c, wall_s=wall)
         home.save_campaign(c)
@@ -1877,7 +1950,7 @@ def provenance_block(r: dict, conf: dict, c: dict) -> str:
             lines.append(f"{comp['id']}: {comp['baseline']} -> {comp['value']} (delta {comp['delta']}, sigma {comp['sigma']}, thr {comp['threshold']}) {'IMPROVED' if comp['improved'] else 'held'}")
     j = r.get("judge") or {}
     lines.append(f"judge: {j.get('verdict', 'n/a')} {j.get('pattern', '')}".rstrip())
-    lines.append(f"confirmation: level={conf.get('level')} rounds={conf.get('rounds')} holdout={'yes' if c.get('walls', {}).get('holdout', True) else 'no'} kappa_eff={conf.get('kappa_eff')}")
+    lines.append(f"confirmation: level={conf.get('level')} rounds={conf.get('rounds')} holdout={'yes' if c.get('walls', {}).get('holdout', True) else 'no'} paired={'yes' if conf.get('paired') else 'no'} kappa_eff={conf.get('kappa_eff')}")
     return "\n".join(lines) + "\n"
 
 
@@ -2653,6 +2726,8 @@ def selftest() -> int:
             cmd_confirm(home, argparse.Namespace(id=e1, force=False))
         r = home.experiments()[e1]
         check("confirm accepts real improvement", r["confirm"]["verdict"] == "accept")
+        check("confirm is paired against fresh head", r["confirm"].get("paired") is True and (r["confirm"].get("head_results") or {}).get("score", {}).get("median") in (40.0, 41.0))
+        check("paired baseline is fresh head median", any(comp["id"] == "score" and comp["baseline"] in (40.0, 41.0) for comp in r["confirm"]["comparisons"]))
         # re-submitting a different (tampered) commit after confirmation must not be acceptable
         wt1 = os.path.join(home.wt_dir, e1)
         git(["reset", "-q", "--soft", c["head_commit"]], wt1)
