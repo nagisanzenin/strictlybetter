@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 # ----------------------------------------------------------------------------
 # Constants (fixed before data; see docs/04 and docs/06). Do not tune to results.
@@ -628,7 +628,7 @@ def fidelity_spec(card: dict, level: str) -> dict:
     # Timing metrics: one unmeasured warm-up run per level (caches, JIT, disk) and at least two
     # recorded screen runs, unless the card says otherwise. Issue #4: a warm-cache n=1 screen
     # showed -30% on a change that was -10% at confirm.
-    spec["warmup"] = int(f.get("warmup", m.get("warmup", 1 if timing else 0)))
+    spec["warmup"] = int(f.get("warmup", m.get("warmup", 1 if (timing and not card.get("audit")) else 0)))   # audit cards: no warm-up unless asked
     if timing and level == "screen" and "repeats" not in f:
         spec["repeats"] = max(2, spec["repeats"])
     spec["max_repeats"] = max(spec["max_repeats"], spec["repeats"])
@@ -1148,7 +1148,7 @@ def decide(card_map: dict, campaign: dict, comparisons: list, level: str) -> dic
             return out
         out["verdict"], out["reason"] = ("inconclusive", "oec-below-threshold") if score > 0 else ("discard", "noise")
         return out
-    improved = [c["id"] for c in goals if c["improved"]]
+    improved = [c["id"] for c in goals if c["improved"] and not (card_map.get(c["id"], {}).get("proxy_for") and card_map.get(c["id"], {}).get("trust") == "demoted")]
     out["improved"] = improved
     if improved:
         out["verdict"], out["reason"] = "promote", "improved:" + ",".join(improved)
@@ -1454,8 +1454,11 @@ def cmd_baseline(home: Home, args) -> int:
             entry.setdefault("levels", {})
             levels = forced_levels or (["screen"] + (["full"] if (card.get("fidelity") or {}).get("full") else []) + ["confirm"])
             levels = [l for l in levels if not fidelity_spec(card, l).get("skip")]
+            is_audit = bool(c and mid in (c.get("audits") or [])) or bool(card.get("audit"))
+            if is_audit:
+                levels = ["confirm"]   # the real instrument: one start value, no sigma, no warm-up (audits compare fresh pairs)
             for level in levels:
-                reps = 1 if card.get("contention_safe") and card["direction"] == "equal" else k
+                reps = 1 if (card.get("contention_safe") and card["direction"] == "equal") or is_audit else k
                 s = measure_card(home, card, level, path, repeats=reps, campaign=c,
                                  use_holdout=(level == "confirm" and (not c or c.get("walls", {}).get("holdout", True))))
                 entry["levels"][level] = {"median": s["median"], "sigma": s["sigma"], "n": s["n_valid"],
@@ -2385,6 +2388,9 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
     for comp in comps:
         mid = comp["id"]
         card = cards[mid]
+        if mid in c["goals"] and card.get("proxy_for") and card.get("trust") == "demoted":
+            tests[mid] = {"kind": "skipped", "note": "demoted proxy: measured, never decides"}
+            continue
         if not comp.get("valid"):
             if mid in c["goals"] or mid in c["guardrails"]:
                 invalid.append(mid)
@@ -2686,6 +2692,8 @@ def run_audit(home: Home, c: dict, kind: str, commit: str, against: str, pairs: 
         if real_id not in rec["metrics"]:
             continue
         real = rec["metrics"][real_id]["verdict"]
+        if real == "invalid":
+            continue   # no data: an invalid real run says nothing about the proxy
         pf = c.setdefault("proxy_fidelity", {}).setdefault(pid, {"audits": 0, "agree": 0, "false_promotions": 0, "misses": 0, "history": [], "exchange_rates": []})
         agree = None
         if said == "better":
@@ -3008,6 +3016,10 @@ def cmd_next(home: Home, args) -> int:
              "scope_paths": c.get("scope_paths") if isinstance(c.get("scope_paths"), list) else [], "external_instruments": c.get("external_instruments_effective") if isinstance(c.get("external_instruments_effective"), list) else [],
              "walls": c.get("walls") if isinstance(c.get("walls"), dict) else {}, "mde": c.get("mde") if isinstance(c.get("mde"), dict) else {},
              "composition": c.get("composition"), "frontier_members": frontier_active(c) if c.get("composition") == "frontier" else None,
+             "audits": c.get("audits") or [], "audits_run": len(c.get("audit_history") or []), "accepts_since_audit": int(num(c.get("accepts_since_audit", 0))),
+             "proxy_trust": {g: home.load_card(g).get("trust") for g in c["goals"] if home.load_card(g).get("proxy_for")},
+             "proxy_fidelity": {k: {kk: vv for kk, vv in v.items() if kk != "history"} for k, v in (c.get("proxy_fidelity") or {}).items()},
+             "last_audit": ({k: {kk: vv for kk, vv in v.items() if kk in ("verdict", "p", "n_pairs", "median_improvement")} for k, v in (c["audit_history"][-1].get("metrics") or {}).items()} if c.get("audit_history") else None),
              "parent_member": (frontier_pick_parent(card_set(home, c), c) or {}).get("id") if c.get("composition") == "frontier" else None,
              "preferred_member": c.get("preferred_member")}
     if args.json:
@@ -3034,6 +3046,10 @@ def cmd_next(home: Home, args) -> int:
         print(f"archive hints: {archive}")
     if brief["inheritance"]:
         print(f"inheritance body: {brief['inheritance']}")
+    if brief.get("audits"):
+        print(f"proxy ladder: audits {brief['audits']} · audits run {brief['audits_run']} · accepts since audit {brief['accepts_since_audit']} · trust {brief['proxy_trust']}")
+        if brief.get("last_audit"):
+            print(f"  last audit: {brief['last_audit']}")
     if brief.get("frontier_members"):
         print(f"frontier ({len(brief['frontier_members'])} members; next parent {brief['parent_member']}; preferred {brief.get('preferred_member')}):")
         for m in brief["frontier_members"]:
@@ -3107,9 +3123,10 @@ def write_report(home: Home, c: dict) -> str:
                 xr = pf.get("exchange_rates") or []
                 lines.append(f"| {pid} | {pc.get('trust')} | {pf.get('audits', 0)} | {pf.get('agree', 0)} | {pf.get('false_promotions', 0)} | {pf.get('misses', 0)} | {round(statistics.median(xr), 3) if xr else 'n/a'} |")
         would = 0.0
+        proxy_reps = max([fidelity_spec(home.load_card(g), "confirm")["repeats"] for g in c["goals"]] or [CONFIRM_REPEATS])
         for a in c["audits"]:
             lv = (b.get(a) or {}).get("levels", {}).get("confirm") or {}
-            would += float(lv.get("secs_per_run") or 0.0) * 2 * CONFIRM_REPEATS * max(1, s["promoted"])
+            would += float(lv.get("secs_per_run") or 0.0) * 2 * proxy_reps * max(1, s["promoted"])
         lines.append(f"\nLadder efficiency: real-instrument time spent on audits {s.get('audit_wall_s')} s; confirming every promoted candidate on the real instrument would have cost about {round(would)} s.")
     lines += ["", "## Guardrails", "", "| metric | direction | start | now | status |", "|---|---|---|---|---|"]
     for mid in c["guardrails"]:
@@ -4036,6 +4053,8 @@ def selftest() -> int:
         c = home.campaign()
         check("proxy ladder: audits listed and proxy provisional", c.get("audits") == ["full_s"] and home.load_card("stage_ms").get("trust") == "provisional")
         check("proxy ladder: real instrument baselined at start", (home.baseline().get("full_s") or {}).get("best") is not None)
+        bl = home.baseline()["full_s"]["levels"]
+        check("proxy ladder: audit card baselined once at confirm only (no 5x, no screen level)", list(bl.keys()) == ["confirm"] and bl["confirm"]["n"] == 1)
         hp = os.path.join(td, "h.json")
         write_json_atomic(hp, {"operator": "config", "target": "real.py", "hypothesis": "outside proxy scope", "predicted": {"stage_ms": "-1%"}})
         try:
@@ -4099,6 +4118,19 @@ def selftest() -> int:
         check("proxy ladder: a proxy-only win is audited and found worse", res_fp == "accept" and last["kind"] == "accept" and last["metrics"]["full_s"]["verdict"] == "worse")
         check("proxy ladder: real ratchet does not move on a worse audit", home.ratchet()["full_s"]["best"] == real_best_before)
         check("proxy ladder: false promotion recorded and trust drops to suspect", c["proxy_fidelity"]["stage_ms"]["false_promotions"] == 1 and home.load_card("stage_ms").get("trust") == "suspect")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cmd_next(home, argparse.Namespace(json=True, seed=1))
+        brief_pl = json.loads(out.getvalue())
+        check("proxy ladder: brief exposes audits, trust and fidelity", brief_pl["audits"] == ["full_s"] and brief_pl["proxy_trust"].get("stage_ms") == "suspect" and brief_pl["audits_run"] >= 4)
+        # a demoted proxy never decides: force demotion, then a proxy win must not be accepted
+        cd_ = home.load_card("stage_ms"); cd_["trust"] = "demoted"; home.save_card(cd_)
+        c = home.campaign(); c["card_hashes"]["stage_ms"] = card_fingerprint(cd_); home.save_campaign(c)
+        try:
+            e_dm, res_dm = run_pl(3, "win on a demoted proxy")
+        except SBError as ex:
+            res_dm = "refused:" + str(ex)[:40]
+        check("proxy ladder: a demoted proxy cannot confirm", not res_dm.startswith("accept"))
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_campaign(home, argparse.Namespace(action="end", file=None, reason="done", no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False, allow_underpowered=False))
         c = home.campaign()

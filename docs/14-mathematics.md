@@ -214,3 +214,5 @@ ladder efficiency   W_audit = audit_wall_s   against   W_would = Σ_R secs_per_r
 ```
 
 `secs_per_run(R, confirm)` is the real card's confirm-level baseline cost (0 when the card was never baselined, which makes `W_would` 0). Not computed: a per-tier split of runs and wall-clock, an interval on the exchange rate, or any error rate on the trust thresholds.
+
+Audit cards default to `warmup = 0` (a 3-pair audit is 6 runs unless the card asks for warm-ups); the audit card is baselined once at confirm level at campaign start. An `invalid` audit verdict updates no fidelity counter: it is no data, not a disagreement. A demoted proxy is measured but excluded from `improved` at screen and confirm.

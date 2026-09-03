@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.1 — 2026-09-03 · what the ladder docs pass caught
+
+### Fixed
+- A demoted proxy could still confirm: its confirm comparison entered the acceptance rule and its screen improvement still promoted. It is now measured but never decides (`confirm_decision` skips it, `decide` ignores it, `covers` no longer admit targets). Selftest "a demoted proxy cannot confirm".
+- The audit card was baselined like any card: k repeats at every level plus warm-ups, about forty hours on a four-hour instrument. It is now baselined once, at confirm level, with no warm-up; audit measurements default to `warmup 0`. Selftest "audit card baselined once at confirm only".
+- An `invalid` audit verdict counted as a disagreement in the proxy's fidelity history. It now updates nothing.
+- The ladder-efficiency "would have cost" figure used the constant confirm repeats; it now uses the proxies' own confirm repeats.
+- `sb next` exposes `audits`, `audits_run`, `accepts_since_audit`, `proxy_trust`, `proxy_fidelity`, and `last_audit`, and prints a proxy-ladder line.
+
+Documented, not changed: `worse` at audit requires every pair to regress (mixed results are `no-change`); the discard audit is one pair with no noise floor, so misses are counted pessimistically on a noisy instrument; audit alpha is the card's and audits sit outside the campaign's K; no per-tier time breakdown yet.
+
+Gates run for this release: selftest 137/137; unittest 62 OK; bun 17/17; the four ladder mutation rows re-run and caught; fuzz 300 states clean on one fresh seed. Benchmarks unchanged.
+
 ## 1.3.0 — 2026-09-03 · the proxy ladder: iterating when the real instrument takes hours
 
 Ten confirmation pairs on a four-hour instrument are eighty hours per candidate. 1.3.0 lets a campaign
@@ -29,8 +42,10 @@ proxy's trust earned from those audits and the guarantee stated where it actuall
   `proxy_fidelity`. Report: "Audited real metrics (the proxy ladder)" (every audit; every proxy's
   fidelity row) and a ladder-efficiency line. Constants `AUDIT_EVERY_ACCEPTS` 3, `AUDIT_DISCARD_RATE`
   0.10, `AUDIT_PAIRS` 3, `AUDIT_ALPHA` 0.05, `TRUST_VALIDATE_MIN_AUDITS` 4, `TRUST_VALIDATE_MIN_AGREE`
-  0.75, `TRUST_SUSPECT_WINDOW` 4, `TRUST_DEMOTE_ON_NEXT`. Selftest section "proxy ladder" (12 checks
-  on a temp repo with a fake slow instrument).
+  0.75, `TRUST_SUSPECT_WINDOW` 4, `TRUST_DEMOTE_ON_NEXT`. Selftest section "proxy ladder" (18 checks
+  on a temp repo with a fake slow instrument: wiring, refusal outside `covers`, first-accept audit,
+  cadence, sampled discard audit, ratchet only on audits, trust to `validated`, a proxy-only win
+  audited `worse` with the ratchet unmoved and trust to `suspect`, the end audit, the report).
 - **Docs.** `docs/15-proxy-ladder.md` is now the field reference and rationale as built (status line,
   decisions taken, every mechanic stated as the code behaves); `docs/14` §14.12 (the audit test, the
   fidelity record, the trust rules with their constants, the discard sampling rule, iterations per
