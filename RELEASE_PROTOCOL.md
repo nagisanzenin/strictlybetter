@@ -26,15 +26,14 @@ where in `scripts/sb.py` the class would live.
 | **3** | **The judge in the arena: experimenter influence on the verdict** | The judge is blind by schema. One extra field, one payload assembled from the conversation instead of from disk, one skill line saying "explain to the judge", and the wall is prose again. | `cmd_judge_verdict` schema check, `skills/_shared/judge-protocol.md`, `agents/sb-judge.md` (Read-only) |
 | **4** | **The stale instrument: sigma from another machine or commit** | 2.5σ is meaningless when σ was measured on a laptop last month. Too small a σ is bug class 1 in a lab coat. | `cmd_baseline` (`env_fingerprint`, `commit`), `campaign_start`'s missing-baseline rule, `rotate_holdout`'s re-baseline, `baseline_level` fallbacks |
 | **5** | **The leaky holdout** | An experimenter that sees confirm numbers of discarded candidates learns the holdout one bit at a time. The docs promise limited leakage; at 1.0.0 the ledger and `sb ledger view` carry full confirm results for every candidate. | `cmd_confirm` ledger payload, `cmd_ledger view`, `cmd_next`, `holdout_values`, `holdout_override` |
-| **6** | **The hook that fails open: the guard allows a frozen edit** | Prompts are advice; the hook is the wall. Exit 0 on a malformed payload, a symlinked path, or a missing campaign file silently makes the instrument writable. | `guard_decision`, `cmd_guard --stdin` (returns 0 when no path is found), `hooks/frozen-guard.sh` exit plumbing |
+| **6** | **The hook that fails open: the guard allows a frozen edit** | Prompts are advice; the hook is the wall. Exit 0 on a malformed payload, a symlinked path, or a missing campaign file silently makes the instrument writable. | `guard_decision`, `cmd_guard --stdin` (returns 0 when no path is found), `hooks/frozen-guard.sh`, whose fast path exits 0 when it cannot find a campaign, a path, `python3`, or the engine |
 | **7** | **The ledger that lies: event order, torn lines** | The ledger is event-sourced and folded by `experiments()`. A torn line is skipped by design, so a torn `accept` line makes an accepted experiment look open. Two writers without the lock interleave. | `read_jsonl`, `Home.experiments`, `append_jsonl`, `MUTATING`, `Home.lock` |
 | **8** | **The budget that leaks: spend counted after work** | A crash between work and accounting is free work the cap never sees. `experiments` is charged before the worktree exists; wall-clock is charged after measurement returns, and in `cmd_measure` outside the `finally`. | `add_spend` call sites in `cmd_prereg`, `cmd_measure`, `cmd_confirm`, `cmd_cost`; `budget_exhausted` |
 | **9** | **The label that lies: a report calling an estimate a measurement** | The arithmetic is right and the reader is still deceived. Dollars are an *estimate* from a default pricing table unless `cost --dollars` was passed; a `$` without `est` upgrades a guess to a fact. | `DEFAULT_PRICING`, `stats()['dollars_est']`, `write_report`, `cmd_status`, every skill line that quotes them |
 
-> **The single sentence to keep:** *a number that is wrong in the direction that reassures is worse
-> than a crash.* Here the reassuring direction is "accepted", "held", "clean", and "under budget".
-> **Its corollary:** *a number whose label is wrong is a wrong number.* `dollars_est` may never lose
-> its suffix on the way to a human.
+> **The sentence to keep:** *a number that is wrong in the direction that reassures is worse than a
+> crash.* Here that direction is "accepted", "held", "clean", "under budget". **Its corollary:** *a
+> number whose label is wrong is a wrong number.* `dollars_est` never loses its suffix on the way to a human.
 
 ---
 
@@ -80,8 +79,8 @@ review caught. A CHANGELOG that only lists wins is marketing.
 
 # THE GATES
 
-Each gate produces a receipt: the command, its output, the number that came out. The receipts go in
-the CHANGELOG paragraph above. A gate without a receipt was not run.
+Each gate produces a receipt (command, output, the number) for the CHANGELOG paragraph above. A
+gate without a receipt was not run.
 
 ## 4 · The selftest gate
 
@@ -100,8 +99,8 @@ checks you did not write, and nothing about whether the ones you wrote are real.
 ## 4.5 · Mutation-test every new check
 
 **A check that still passes when you revert its fix is theatre.** engram found 3 fake checks in one
-release and 4 in the next; the rate did not fall. For every check added this release: revert the fix
-it guards, run the suite, confirm **that specific check** fails, restore.
+release and 4 in the next. For every check added this release: revert the fix it guards, run the
+suite, confirm **that specific check** fails, restore.
 
 ```bash
 cp scripts/sb.py /tmp/sb.bak
@@ -122,6 +121,8 @@ suite for the suite.
 | 5 holdout | `s/use_holdout=walls.get("holdout", True)/use_holdout=False/` in `cmd_confirm` | *no check exists yet: §5 must show the confirm ledger event carrying `SB_SEED` from the holdout list* |
 | 6 guard | `s/return False, f"frozen path/return True, f"frozen path/` | `guard denies frozen path` |
 | 6 guard | `s/return False, "state files/return True, "state files/` | `guard denies state file` |
+| 6 hook | feed `hooks/frozen-guard.sh` a real PreToolUse payload naming a frozen path while a campaign runs | must exit 2 with the reason on stderr; *no test exists yet: `tests/test_hooks.py` is the file to write* |
+| validity | `s/instr_ratio < WALL_DIVERGENCE_INSTR/False/` in `comparisons_for` | the divergence check added in e02c360 must go red (name it here when you run this) |
 | 7 ledger | delete the `except json.JSONDecodeError: continue` in `read_jsonl` | `torn ledger line tolerated` (a suite crash is also red) |
 | 8 budget | move `add_spend(c, experiments=1)` below `worktree_new` in `cmd_prereg` | *no check exists yet: the budget class has an exhaustion check and no ordering check* |
 | 9 label | `s/dollars_est/dollars/` in `stats` | *no check exists yet: assert the rendered report contains `estimated`* |
@@ -154,9 +155,9 @@ git diff main...HEAD > /tmp/sb-review/diff
 ```
 
 Name the risk areas: the acceptance rule and every number it feeds, the guard's path logic
-(symlinks, not-yet-existing paths, notebooks), the ledger fold, back-compat with state written by the
-previous version, and **every new number**. Prose files matter for cross-file consistency: a skill
-that tells the judge one thing and `judge-protocol.md` another.
+(symlinks, not-yet-existing paths, notebooks), the ledger fold, back-compat with older state, and
+**every new number**. Prose matters for cross-file consistency: a skill that tells the judge one
+thing and `judge-protocol.md` another.
 
 1. **Green tests are not evidence about the design.** engram found 10 defects behind 79 green checks.
 2. **Never trust a review whose agents errored.** Check the failure list before the verdict.
@@ -245,7 +246,8 @@ worse than a correct one: `card probe` does this per card; §4.9 does it for the
 ## 4.9 · The gaming suite: every trick caught by a named wall
 
 ```bash
-python3 bench/run_bench.py --mode gaming        # scripted, LLM-free gaming experimenter on pyfix
+python3 bench/run_bench.py --mode gaming --fixture pyfix     # wall-ablation matrix, LLM-free
+python3 bench/run_bench.py --mode scripted --fixture pyfix   # walls vs naive: false accepts, cost
 ```
 
 The suite passes only when **each trick is caught by the wall named for it** and **removing any
@@ -260,6 +262,7 @@ for exactly this).
 | output hard-coded, lookup table, or the computing component replaced by a search | `holdout` and the `equal` checksum guardrail; `judge` | `bench_checksum` card; `sb-judge` |
 | native escape (`ctypes`, another toolchain) | `judge` checklist and the `deps:` integrity rule | `cmd_submit` `new_deps`; `sb-judge` |
 | zero-duration run | `validity` | `expected_duration_s`; rc / parse checks |
+| timer or instrument reports a speed-up the process wall-clock contradicts | `validity` divergence check | `comparisons_for`, `WALL_DIVERGENCE_*` |
 | faked log or receipt written by the diff | `judge` checklist; `state:` integrity rule | `cmd_submit` (`.strictlybetter/` in diff) |
 | environment tampering (`PYTHONHASHSEED`, threads) | `judge` checklist; harness-owned env | `measure_once` env |
 | lucky noise (the +5% that is really ±3%) | `noise_floor` and `confirm` | `compare_metric`, `cmd_confirm` |
@@ -404,23 +407,20 @@ git show origin/main:.claude-plugin/plugin.json | grep version   # == X.Y.Z  (th
 ## 7.5 · The post-release independent review
 
 Every gate above is run by the person who wrote the code, on the code they believe is right. After
-every release that touches the engine, spawn a reviewer against `main` with:
-
-- the shipped code, **not** the diff;
-- the list of what the pre-release review already found, so it does not re-report;
-- the standing instruction: **"find a number that is wrong, especially one that is wrong in the
-  direction that reassures: an accept that should have been a discard, a `held` that was never
-  measured, a `$` that is an estimate, a sigma from another machine."**
-
-If it finds something, ship the patch immediately and title the patch release by what the review
-caught. Three releases in an hour is not a failure; a wrong number left standing is.
+every release that touches the engine, spawn a reviewer against `main` with the shipped code (**not**
+the diff), the list of what the pre-release review already found, and the standing instruction:
+**"find a number that is wrong, especially one that is wrong in the direction that reassures: an
+accept that should have been a discard, a `held` that was never measured, a `$` that is an estimate,
+a sigma from another machine."** If it finds something, ship the patch immediately and title the
+patch release by what the review caught. Three releases in an hour is not a failure; a wrong number
+left standing is.
 
 ## 7.6 · The platform-port verification table
 
-The omniplugin ladder (`docs/10-implementation-plan.md` M7) adds platforms one at a time, and this
-table must be honest per platform, per release. "Verified live" means a real session on that platform
-ran a full cycle on a fixture *from the release tree* and the guard denied a frozen edit there.
-Anything less is "Not verified", in those words, here and in `INSTALL-<PLATFORM>.md`.
+The omniplugin ladder (`docs/10` M7) adds platforms one at a time; this table must be honest per
+platform, per release. "Verified live" means a real session on that platform ran a full cycle on a
+fixture *from the release tree* and the guard denied a frozen edit there. Anything less is "Not
+verified", in those words, here and in `INSTALL-<PLATFORM>.md`.
 
 | Platform | Engine | Skills | Guard hook | Stop-driver | Status |
 |---|---|---|---|---|---|
@@ -445,9 +445,9 @@ tests, never platform names.
 claude plugin marketplace update strictlybetter && claude plugin update strictlybetter@strictlybetter
 ```
 
-then restart or `/reload-plugins`. State (`.strictlybetter/`) lives in the target repo, not the
-plugin cache, so it survives an update; say so. Close the issues this release fixes with a real
-reply: what shipped, what the wrinkle was, how to get it.
+then restart or `/reload-plugins`. State lives in the target repo, not the plugin cache, so it
+survives an update; say so. Close the issues this release fixes with a real reply: what shipped, what
+the wrinkle was, how to get it.
 
 ### One-glance checklist
 

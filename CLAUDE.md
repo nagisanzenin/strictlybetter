@@ -46,7 +46,7 @@ then `docs/10-implementation-plan.md`.
 | Path | What |
 |---|---|
 | `scripts/sb.py` | the engine: constants, cards, measurement, acceptance rule, ledger, campaign verbs, guard, selftest |
-| `tests/test_engine.py` | stdlib `unittest` suite for the engine |
+| `tests/test_engine.py`, `tests/test_fixture_campaign.py` | stdlib `unittest`: engine units; end-to-end through the real CLI on pyfix |
 | `tests/fixtures/` | `pyfix`, `rustfix`, `greenfield` fixture repos, their `fixture-cards/`, `make_fixture.py` |
 | `docs/` | the theory (00 thesis … 10 implementation plan, 11 ML mapping, citations) |
 | `archetypes/*.json` | discovery priors per project archetype: default cards, protected paths, operator priors |
@@ -66,8 +66,8 @@ python3 scripts/sb.py selftest                 # the badge; must end "N/N checks
 python3 -m unittest discover -s tests          # engine unit tests
 python3 tests/fixtures/make_fixture.py pyfix /tmp/x   # throwaway repo for a live campaign
 python3 scripts/sb.py --repo /tmp/x init       # then card add / probe / campaign start / prereg …
-python3 bench/run_bench.py --mode gaming       # every casebook trick must be caught by a named wall
-python3 bench/run_bench.py                     # walled vs naive on the fixtures → bench/results/
+python3 bench/run_bench.py --mode gaming --fixture pyfix    # every trick caught by a named wall
+python3 bench/run_bench.py --mode scripted --fixture pyfix  # walls vs naive → bench/results/
 ```
 
 The docstring at the top of `sb.py` is the command reference. Never run a campaign against a

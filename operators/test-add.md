@@ -59,6 +59,6 @@ Name the function or behaviour under test, the case being captured, and what the
 {"id": "e0014", "operator": "test-add", "target": "tests/test_conservation.py",
  "hypothesis": "No test checks energy conservation over a long run; a 1,000-step test on the smallest case with a 1e-8 relative bound turns the conservation diagnostic into a guardrail the next campaign can freeze.",
  "mechanism": "the current baseline drift is 3e-10 over 1,000 steps; the bound leaves two orders of magnitude of headroom so honest solver changes pass and a wrong time step fails",
- "predicted": {"tests_collected": "+1", "tests_failed": "0", "instrument_sensitivity": "+1 detected degradation"},
+ "predicted": {"tests_collected": "+1", "tests_failed": "0", "instrument_sensitivity": "+1"},
  "expected_diff_size": "small", "est_cost_s": 120}
 ```

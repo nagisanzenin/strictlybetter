@@ -501,8 +501,14 @@ def fidelity_spec(card: dict, level: str) -> dict:
         "holdout": f.get("holdout"),
         "expected_duration_s": f.get("expected_duration_s", m.get("expected_duration_s")),
         "allow_nonzero_exit": bool(f.get("allow_nonzero_exit", m.get("allow_nonzero_exit", False))),
+        "skip": bool(f.get("skip", False)),  # confirm-only metrics (held-out test split) skip screen/full
     }
     spec["max_repeats"] = max(spec["max_repeats"], spec["repeats"])
+    band = spec.get("expected_duration_s")
+    try:
+        spec["expected_duration_s"] = [float(band[0]), float(band[1])] if band and len(band) == 2 else None
+    except (TypeError, ValueError):
+        spec["expected_duration_s"] = None  # placeholder bands ("{{budget_s}} * 0.9") are the metrologist's to resolve
     return spec
 
 
@@ -1129,6 +1135,7 @@ def cmd_baseline(home: Home, args) -> int:
             entry = baseline.get(mid) or {}
             entry.setdefault("levels", {})
             levels = forced_levels or (["screen"] + (["full"] if (card.get("fidelity") or {}).get("full") else []) + ["confirm"])
+            levels = [l for l in levels if not fidelity_spec(card, l).get("skip")]
             for level in levels:
                 reps = 1 if card.get("contention_safe") and card["direction"] == "equal" else k
                 s = measure_card(home, card, level, path, repeats=reps, campaign=c, use_holdout=(level == "confirm"))
@@ -1368,7 +1375,7 @@ def cmd_submit(home: Home, args) -> int:
 
 
 def cmd_measure(home: Home, args) -> int:
-    c = require_campaign(home)
+    c = require_campaign(home, running=False)  # reproduction after a campaign ended is allowed
     eid = args.id
     r = experiment_record(home, eid)
     level = args.fidelity
@@ -1382,11 +1389,15 @@ def cmd_measure(home: Home, args) -> int:
         checkout = worktree_new(home, f"{eid}-{level}", r["commit"])
     results = {}
     t0 = time.perf_counter()
+    wall = 0.0
     try:
         ids = list(c["goals"]) + list(c["guardrails"]) + (list(c["diagnostics"]) if level != "screen" else [])
         for mid in ids:
             card = cards[mid]
             spec = fidelity_spec(card, level)
+            if spec.get("skip"):
+                results[mid] = {"skipped": True, "valid": True, "median": None, "sigma": None, "n": 0, "n_valid": 0, "values": [], "invalid": [], "secs_total": 0.0, "fidelity": level}
+                continue
             reps = spec["repeats"]
             if level == "screen":
                 reps = max(1, reps * int(c.get("screen_repeats_multiplier", 1)))
@@ -1399,9 +1410,9 @@ def cmd_measure(home: Home, args) -> int:
     finally:
         if level == "confirm" or checkout != os.path.join(home.wt_dir, eid):
             worktree_drop(home, os.path.basename(checkout))
-    wall = time.perf_counter() - t0
-    add_spend(c, wall_s=wall)
-    home.save_campaign(c)
+        wall = time.perf_counter() - t0
+        add_spend(c, wall_s=wall)
+        home.save_campaign(c)
     home.ledger_add(eid, "measure", {"fidelity": level, "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in results.items()}, "wall_s": round(wall, 3)})
     for mid, s in results.items():
         print(f"{eid} {level:8} {mid:22} median={s['median']} n={s['n_valid']}/{s['n']}" + (f" INVALID {s['invalid']}" if not s['valid'] else ""))
@@ -1418,6 +1429,8 @@ def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict) -> 
     for mid in list(c["goals"]) + list(c["guardrails"]):
         card = cards[mid]
         meas = results.get(mid) or {"valid": False, "invalid": ["not measured"]}
+        if meas.get("skipped") or fidelity_spec(card, level).get("skip"):
+            continue  # confirm-only metric: not part of this level's decision
         base = baseline_level(b, mid, level, strict=(card["direction"] == "equal"))
         kap = float((card.get("acceptance") or {}).get("kappa", KAPPA))
         tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA))
@@ -1532,7 +1545,7 @@ def cmd_confirm(home: Home, args) -> int:
         full_results = {}
         for mid in list(c["goals"]) + list(c["guardrails"]):
             card = cards[mid]
-            if (card.get("fidelity") or {}).get("full"):
+            if (card.get("fidelity") or {}).get("full") and not fidelity_spec(card, "full").get("skip"):
                 full_results[mid] = measure_card(home, card, "full", checkout, repeats=fidelity_spec(card, "full")["repeats"], campaign=c, use_holdout=False)
         if full_results:
             comps_full, _ = comparisons_for(home, c, r, "full", {**{m: full_results.get(m) or {"valid": False, "invalid": ["not measured"]} for m in full_results}})
@@ -1549,6 +1562,8 @@ def cmd_confirm(home: Home, args) -> int:
         for mid in list(c["goals"]) + list(c["guardrails"]) + list(c["diagnostics"]):
             card = cards[mid]
             spec = fidelity_spec(card, "confirm")
+            if spec.get("skip"):
+                continue
             reps = spec["max_repeats"] if anomaly else spec["repeats"]
             results[mid] = measure_card(home, card, "confirm", checkout, repeats=reps, campaign=c, use_holdout=walls.get("holdout", True))
         comps, ke = comparisons_for(home, c, r, "confirm", results)
@@ -2070,9 +2085,23 @@ def cmd_doctor(home: Home, args) -> int:
     return 0 if ok else 1
 
 
+def redact(rec: dict) -> dict:
+    """Limited leakage (docs/04 §4.4): a discarded candidate's holdout numbers stay in the file
+    for audit but are not surfaced to the experimenter-facing views."""
+    r = dict(rec)
+    if r.get("verdict") == "discard" and isinstance(r.get("confirm"), dict):
+        cf = dict(r["confirm"])
+        for k in ("results", "comparisons", "confirm_effect"):
+            if k in cf:
+                cf[k] = "<redacted: holdout numbers of a discarded candidate>"
+        r["confirm"] = cf
+    return r
+
+
 def cmd_ledger(home: Home, args) -> int:
     if args.action == "view":
-        print(json.dumps(experiment_record(home, args.id), indent=2))
+        rec = experiment_record(home, args.id)
+        print(json.dumps(rec if args.unredacted else redact(rec), indent=2))
     elif args.action == "tail":
         for e in home.ledger_events()[-int(args.n or 20):]:
             print(json.dumps(e))
@@ -2381,6 +2410,8 @@ def selftest() -> int:
         with open(home.ledger_path, "a") as f:
             f.write("{not json\n")
         check("torn ledger line tolerated", isinstance(home.experiments(), dict))
+        fake = {"verdict": "discard", "confirm": {"results": {"score": {"median": 1}}, "comparisons": [], "confirm_effect": 0.1, "reason": "noise"}}
+        check("discarded confirm numbers redacted", "redacted" in str(redact(fake)["confirm"]["results"]) and redact(fake)["confirm"]["reason"] == "noise")
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_report(home, argparse.Namespace())
         check("report written", os.path.exists(home.p("reports", "t1.md")))
@@ -2426,7 +2457,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor")
     sub.add_parser("selftest")
     sub.add_parser("stop")
-    sp = sub.add_parser("ledger"); sp.add_argument("action", choices=["view", "tail", "experiments"]); sp.add_argument("id", nargs="?"); sp.add_argument("-n", type=int)
+    sp = sub.add_parser("ledger"); sp.add_argument("action", choices=["view", "tail", "experiments"]); sp.add_argument("id", nargs="?"); sp.add_argument("-n", type=int); sp.add_argument("--unredacted", action="store_true", help="audit use: include discarded candidates' holdout numbers")
     sp = sub.add_parser("inheritance"); sp.add_argument("action", choices=["write", "show"]); sp.add_argument("--file")
     sp = sub.add_parser("worktree"); sp.add_argument("action", choices=["new", "drop", "path", "list"]); sp.add_argument("id", nargs="?"); sp.add_argument("--commit")
     sp = sub.add_parser("drive"); sp.add_argument("--command", required=True); sp.add_argument("--cycles", type=int, default=10); sp.add_argument("--timeout", type=float, default=3600); sp.add_argument("--verbose", action="store_true")
