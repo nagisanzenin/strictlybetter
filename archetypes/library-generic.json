@@ -1,0 +1,172 @@
+{
+  "id": "library-generic",
+  "title": "Generic library (any language with a build and a test command)",
+  "match": {
+    "any_files": ["Makefile", "justfile", "CMakeLists.txt", "go.mod", "build.gradle", "build.gradle.kts", "pom.xml", "mix.exs", "Gemfile", "composer.json", "dune-project", "stack.yaml", "cabal.project", "Package.swift", "build.zig", "meson.build"],
+    "any_dirs": ["src", "lib", "test", "tests", "spec"],
+    "languages": ["go", "java", "kotlin", "c", "cpp", "ruby", "php", "elixir", "haskell", "ocaml", "swift", "zig", "csharp", "scala"],
+    "any_deps": []
+  },
+  "confidence_notes": "The fallback for any repo with a build system and a test command that no other pack claims. Match it at low confidence whenever a build file exists; raise confidence when a test directory is present. Prefer a specific pack when one matches at all: a Go module with a cmd/ and a server framework is service-api; a Go module with a cmd/ and cobra is cli-tool. The commands here are placeholders the orienteer fills from the Makefile, justfile, CI workflow, or the language's conventions (go test ./..., mvn -q test, ctest, mix test, bundle exec rspec, dotnet test). Every card wraps the exit status, because counting formats differ per language; where the runner has a machine-readable report (go test -json, JUnit XML, ctest --output-junit) the metrologist should upgrade the card to a real count.",
+  "commands": {
+    "build": "{{build_command}}",
+    "test": "{{test_command}}",
+    "lint": "{{lint_command}}",
+    "bench": "{{bench_command}}",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".gitlab-ci.yml", ".env", ".env.*", "*.pem", "secrets/", "go.sum", "Gemfile.lock", "composer.lock", "gradle.lockfile", "mix.lock", "*.lock", "LICENSE*", "vendor/", "third_party/"],
+  "frozen_paths_hint": ["tests/", "test/", "spec/", "testdata/", "fixtures/", "bench/", "benchmarks/", "golden/"],
+  "default_cards": [
+    {
+      "id": "build_failed",
+      "title": "Build exits nonzero",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bool",
+      "measure": {
+        "command": "if {{build_command}} >/dev/null 2>&1; then echo METRIC build_failed=0; else echo METRIC build_failed=1; fi",
+        "parse": "metric-line:build_failed",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "{{introduce_syntax_error_command}}", "expected": "worse"},
+      "gaming_risks": ["a module excluded from the build so the error disappears with the code", "warnings-as-errors disabled in the build config (protected or declared as config)"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "tests_failed",
+      "title": "Test suite failed (exit status of {{test_command}})",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "{{test_command}} >/dev/null 2>&1; rc=$?; echo \"METRIC tests_failed=$rc\"",
+        "parse": "metric-line:tests_failed",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["tests/", "test/", "spec/", "testdata/", "fixtures/"]},
+      "degradation": {"apply": "{{break_one_function_command}}", "expected": "worse"},
+      "gaming_risks": ["a test target narrowed in the build file or the runner's config (go test ./pkg/... instead of ./...; a JUnit include pattern; a ctest -R filter)", "tests skipped by a build tag, an environment check, or a t.Skip in a non-frozen helper", "assertions weakened", "a zero-test run reads as exit 0 in many runners: pair with a tests_run count card whenever the runner can report one"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "tests_run",
+      "title": "Tests executed (narrowing detector; from {{test_count_command}})",
+      "kind": "guardrail",
+      "direction": "maximize",
+      "unit": "count",
+      "measure": {
+        "command": "{{test_count_command}}",
+        "parse": "metric-line:tests_run",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["tests/", "test/", "spec/"]},
+      "degradation": {"apply": "{{deselect_one_test_command}}", "expected": "worse"},
+      "gaming_risks": ["trivial tests added to offset removed ones (tests are frozen; a non-frozen helper that registers tests dynamically is the workaround)", "the count taken from a cached report"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "lint_errors",
+      "title": "Lint problems reported by {{lint_command}}",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "out=$({{lint_command}} 2>&1); rc=$?; [ $rc -le 1 ] || { printf '%s\\n' \"$out\" >&2; exit $rc; }; n=$(printf '%s\\n' \"$out\" | grep -cE '{{lint_line_regex}}'); echo \"METRIC lint_errors=$n\"",
+        "parse": "metric-line:lint_errors",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1", "NO_COLOR": "1"},
+        "expected_duration_s": [0.2, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["{{lint_config_path}}"]},
+      "degradation": {"apply": "{{introduce_lint_violation_command}}", "expected": "worse"},
+      "gaming_risks": ["suppression comments (nolint, NOSONAR, rubocop:disable, @SuppressWarnings) added", "the linter's config loosened or a path excluded (the config is frozen; an inline override is the workaround)", "code deleted"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "coverage_pct",
+      "title": "Line coverage from {{coverage_command}} (instrument-campaign goal)",
+      "kind": "diagnostic",
+      "direction": "maximize",
+      "unit": "%",
+      "measure": {
+        "command": "{{coverage_command}}",
+        "parse": "metric-line:coverage_pct",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"CI": "1"},
+        "expected_duration_s": [1, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "{{add_untested_function_command}}", "expected": "worse"},
+      "gaming_risks": ["code deleted to raise the ratio", "coverage exclusion markers added", "tests that execute code without asserting anything: only a goal in an instrument campaign where the implementation is frozen"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "api_surface_lines",
+      "title": "Public API surface (lines of {{api_dump_command}})",
+      "kind": "guardrail",
+      "direction": "equal",
+      "unit": "count",
+      "measure": {
+        "command": "n=$({{api_dump_command}} | LC_ALL=C sort -u | wc -l | tr -d ' '); [ \"$n\" -gt 0 ] || exit 1; echo \"METRIC api_surface_lines=$n\"",
+        "parse": "metric-line:api_surface_lines",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {},
+        "expected_duration_s": [0.1, 600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "{{add_public_symbol_command}}", "expected": "worse"},
+      "gaming_risks": ["one symbol removed and one added keeps the count equal: the recommended check is a diff of the dump against the baseline commit, not the count", "symbols hidden from the dump (a build tag, an @internal annotation) while still exported"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 4],
+    "algorithmic": [2, 4],
+    "allocation": [2, 4],
+    "caching": [2, 4],
+    "concurrency": [1, 5],
+    "dependency": [1, 6],
+    "test-add": [2, 3],
+    "bugfix": [2, 3],
+    "refactor-enabling": [1, 5],
+    "data": [1, 8],
+    "model": [1, 9],
+    "numerics": [1, 7],
+    "docs": [1, 6]
+  },
+  "noise_sources": ["per-language: JIT warm-up (JVM, .NET), build caches (Gradle daemon, ccache, go build cache), test parallelism and ordering, garbage collection timing"],
+  "hygiene_guardrails": ["build_failed", "tests_failed"],
+  "notes": "This pack is deliberately thin; its value is the placeholders and the gaming_risks, not the commands. The orienteer fills {{build_command}}, {{test_command}}, {{lint_command}} from the repo's own Makefile, justfile, or CI, and the metrologist writes {{test_count_command}} (something that prints METRIC tests_run=<n>: go test -json ./... piped through a count of pass/fail actions, a JUnit XML testcase count, ctest -N), {{coverage_command}} (prints METRIC coverage_pct=<pct>: go tool cover -func, jacoco CSV, simplecov JSON), and {{api_dump_command}} (go doc -all ./..., javap -public on the jar, nm -g --defined-only on the .so, cargo public-api for Rust) with {{lint_line_regex}} matching one line per finding (golangci-lint: '^[^:]+:[0-9]+:[0-9]+:'). Exit-status wrappers accept rc 0 or 1 from the linter as a valid run and treat anything else as a tool failure. Once the project's ecosystem is known well enough to write counting commands, promote it to a specific pack or add one under archetypes/; a pack whose cards all wrap exit codes gives the loop very little to see."
+}

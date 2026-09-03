@@ -1,0 +1,172 @@
+{
+  "id": "docs-site",
+  "title": "Documentation site",
+  "match": {
+    "any_files": ["mkdocs.yml", "docs/conf.py", "docusaurus.config.js", "docusaurus.config.ts", "book.toml", "_config.yml", "astro.config.mjs", "hugo.toml", "config.toml", "typedoc.json", "vitepress.config.ts"],
+    "any_dirs": ["docs", "book", "site", "content", "_posts"],
+    "languages": ["markdown", "restructuredtext", "python", "javascript", "typescript"],
+    "any_deps": ["mkdocs", "mkdocs-material", "sphinx", "docusaurus", "@docusaurus/core", "vitepress", "mdbook", "typedoc", "interrogate", "pydocstyle"]
+  },
+  "confidence_notes": "The deliverable is rendered documentation. Signals: a static-site generator config, a docs/ or content/ tree of markdown or rst, a build that emits HTML, an API reference generated from a package. If the docs live inside a code repo, this is secondary to the code archetype and its goals only make sense in a docs campaign. Readability scores are gameable and are shipped as diagnostics. API coverage is only meaningful when there is a package to document; the card assumes Python and interrogate, swap for typedoc or cargo doc warnings otherwise.",
+  "commands": {
+    "build": "{{build_command}}",
+    "test": null,
+    "lint": "{{lint_command}}",
+    "bench": null,
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "secrets/", "package-lock.json", "requirements*.txt", "uv.lock", "CNAME", "netlify.toml", "vercel.json", "_redirects", "robots.txt"],
+  "frozen_paths_hint": ["tests/", "tests/snapshots/", "docs/snapshots/", ".lycheeignore"],
+  "default_cards": [
+    {
+      "id": "build_failed",
+      "title": "Docs build exits nonzero",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bool",
+      "measure": {
+        "command": "if {{build_command}} >/dev/null 2>&1; then echo METRIC build_failed=0; else echo METRIC build_failed=1; fi",
+        "parse": "metric-line:build_failed",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "printf '\\n- [Broken](nonexistent-page-sb.md)\\n' >> {{nav_source_file}}", "expected": "worse"},
+      "gaming_risks": ["strict mode disabled in the generator config so warnings no longer fail the build (a config operator; must be declared)", "pages removed from the nav to make the build pass (nav_snapshot_diff_lines catches it)"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "broken_links",
+      "title": "Broken internal links in the built site (lychee --offline)",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "command -v lychee >/dev/null 2>&1 || exit 3; {{build_command}} >/dev/null 2>&1 || exit 1; lychee --offline --no-progress --format json --root-dir \"$(pwd)/{{site_dir}}\" '{{site_dir}}/**/*.html' 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(\"METRIC broken_links=%d\" % (d.get(\"failures\",0)+d.get(\"errors\",0)))'",
+        "parse": "metric-line:broken_links",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": [".lycheeignore"]},
+      "degradation": {"apply": "printf '\\n[sb degradation](../does-not-exist-sb.md)\\n' >> {{any_doc_page}}", "expected": "worse"},
+      "gaming_risks": ["links removed instead of fixed (a page that links to nothing has zero broken links; the nav snapshot and a word-count diagnostic show the shrinkage)", "an exclude pattern added to .lycheeignore (frozen) or inline via --exclude in a non-frozen wrapper", "links turned into plain text"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "api_doc_coverage",
+      "title": "Docstring coverage of {{package_dir}} (interrogate)",
+      "kind": "goal",
+      "direction": "maximize",
+      "unit": "%",
+      "measure": {
+        "command": "command -v interrogate >/dev/null 2>&1 || exit 3; interrogate -q --fail-under 0 {{package_dir}}",
+        "parse": "regex:actual: (\\d+\\.\\d+)%",
+        "cwd": ".",
+        "timeout_s": 120,
+        "env": {},
+        "expected_duration_s": [0.1, 120]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["pyproject.toml"]},
+      "degradation": {"apply": "printf '\\ndef sb_undocumented_a(x):\\n    return x\\n\\ndef sb_undocumented_b(x):\\n    return x\\n' >> {{package_dir}}/__init__.py", "expected": "worse"},
+      "gaming_risks": ["one-word or template docstrings (\"Docstring.\") that satisfy the counter; the judge should read a sample of added docstrings", "public symbols made private with a leading underscore to shrink the denominator", "[tool.interrogate] exclude widened (the config lives in pyproject.toml, frozen for this card)", "code deleted"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "readability_fre",
+      "title": "Flesch reading ease over all pages (textstat)",
+      "kind": "diagnostic",
+      "direction": "maximize",
+      "unit": "score",
+      "measure": {
+        "command": "python3 -c 'import textstat' 2>/dev/null || exit 3; python3 -c 'import glob,re,textstat; t=\" \".join(open(f, encoding=\"utf-8\", errors=\"ignore\").read() for f in glob.glob(\"{{docs_dir}}/**/*.md\", recursive=True)); t=re.sub(r\"```.*?```\", \" \", t, flags=re.S); print(\"METRIC readability_fre=%.2f\" % textstat.flesch_reading_ease(t))'",
+        "parse": "metric-line:readability_fre",
+        "cwd": ".",
+        "timeout_s": 120,
+        "env": {},
+        "expected_duration_s": [0.1, 120]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "printf '\\nNotwithstanding the aforementioned considerations, the implementation heretofore described necessitates comprehensive reconsideration of the architectural underpinnings, particularly insofar as the interdependencies between constituent subsystems manifest emergent characteristics.\\n' >> {{any_doc_page}}", "expected": "worse"},
+      "gaming_risks": ["this is the archetypal gameable metric: short sentences of short words score high regardless of meaning; it ships as a diagnostic and should not be a goal without a human reading the diff", "technical terms removed or misspelled to lower syllable counts", "long pages deleted"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "build_s",
+      "title": "Docs build wall-clock",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "s",
+      "measure": {
+        "command": "rm -rf {{site_dir}}; /usr/bin/time -p {{build_command}} 2>&1 >/dev/null",
+        "parse": "regex:real (\\d+\\.\\d+)",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 3}, "confirm": {"repeats": 3, "max_repeats": 6}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "python3 -c \"import os; d='{{docs_dir}}/sb_bloat'; os.makedirs(d, exist_ok=True); [open(os.path.join(d, 'p%03d.md' % i), 'w').write('# Page %d\\n\\n' % i + ('lorem ipsum dolor sit amet ' * 400 + '\\n\\n') * 20) for i in range(150)]\"", "expected": "worse"},
+      "gaming_risks": ["plugins disabled (search index, minification, social cards) in the generator config outside a declared config hypothesis", "pages removed from the build", "an incremental build cache left in place (the command removes the site dir; a plugin cache elsewhere is the workaround)"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "nav_snapshot_diff_lines",
+      "title": "Lines differing between the built nav links and the frozen snapshot",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "lines",
+      "measure": {
+        "command": "{{build_command}} >/dev/null 2>&1 || exit 1; [ -f {{nav_snapshot}} ] || exit 3; n=$(grep -o 'href=\"[^\"#?]*\"' {{site_dir}}/index.html | sed 's/href=//; s/\"//g' | grep -v '^http' | LC_ALL=C sort -u | diff - {{nav_snapshot}} | grep -c '^[<>]'); echo \"METRIC nav_snapshot_diff_lines=$n\"",
+        "parse": "metric-line:nav_snapshot_diff_lines",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1"},
+        "expected_duration_s": [0.5, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["{{nav_snapshot}}"]},
+      "degradation": {"apply": "perl -0pi -e 's/^(\\s*- .*\\n)//m' {{nav_source_file}}", "expected": "worse"},
+      "gaming_risks": ["the snapshot regenerated (frozen)", "nav entries kept while the pages behind them were emptied (broken_links stays zero for an empty page; a per-page word-count floor is the stronger instrument if this matters)"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 4],
+    "algorithmic": [1, 7],
+    "allocation": [1, 9],
+    "caching": [2, 5],
+    "concurrency": [1, 8],
+    "dependency": [2, 5],
+    "test-add": [1, 6],
+    "bugfix": [3, 3],
+    "refactor-enabling": [1, 6],
+    "data": [1, 9],
+    "model": [1, 9],
+    "numerics": [1, 9],
+    "docs": [4, 2]
+  },
+  "noise_sources": ["none significant for counts; build time varies with disk cache and any search-index plugin"],
+  "hygiene_guardrails": ["build_failed", "nav_snapshot_diff_lines"],
+  "notes": "Fill {{build_command}} from the generator (mkdocs build --strict, sphinx-build -W -b html docs site, npm run build, mdbook build), {{site_dir}} with its output (site, _build/html, build, book), {{docs_dir}} with the source tree, {{nav_source_file}} with the file that defines navigation (mkdocs.yml nav, SUMMARY.md, sidebars.js), and {{nav_snapshot}} with a checked-in sorted list of nav hrefs created at INSTRUMENT and frozen. The docs operator is the warm one; bugfix means fixing a wrong statement or a broken example, which is the most valuable docs change and the one a link counter cannot see. broken_links and api_doc_coverage are the usable goals; readability ships as a diagnostic on purpose. lychee's JSON summary keys (failures, errors) are those of lychee 0.14+; verify once with a known-broken link before trusting the card."
+}

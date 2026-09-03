@@ -1,0 +1,176 @@
+{
+  "id": "ml-inference",
+  "title": "ML inference (serve or score a trained model)",
+  "match": {
+    "any_files": ["serve.py", "predict.py", "infer.py", "inference.py", "model.onnx", "model.safetensors", "model.pt", "model.gguf", "handler.py"],
+    "any_dirs": ["models", "weights", "checkpoints", "eval", "evals"],
+    "languages": ["python", "rust", "cpp"],
+    "any_deps": ["onnxruntime", "torch", "tensorrt", "vllm", "llama-cpp-python", "ctranslate2", "tflite-runtime", "openvino", "candle", "ort", "triton"]
+  },
+  "confidence_notes": "A saved model plus code that loads it and produces predictions; no optimizer loop. Signals: weight files or a model download step, a predict or serve entry point, an eval script that reports accuracy against a labelled set. If a train.py with an optimizer exists, ml-training is primary and this is secondary. If the model is behind an HTTP endpoint, stack service-api and measure latency through the socket; the cards here measure in-process. The eval set and the scoring script are the instrument and are frozen from the first campaign; if there is no labelled eval set the first campaign is an instrument campaign that builds one.",
+  "commands": {
+    "build": null,
+    "test": "python3 -m pytest -q tests",
+    "lint": "ruff check .",
+    "bench": "python3 {{bench_script}}",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "secrets/", "requirements*.txt", "uv.lock", "models/", "weights/", "checkpoints/", "eval/", "evals/", "evaluate.py", "eval.py", "data/eval*", "data/test*"],
+  "frozen_paths_hint": ["evaluate.py", "eval.py", "eval/", "evals/", "data/eval*", "data/test*", "tests/", "bench/", "benchmarks/"],
+  "default_cards": [
+    {
+      "id": "latency_p50_ms",
+      "title": "Median single-request latency, {{bench_script}}",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "ms",
+      "measure": {
+        "command": "python3 {{bench_script}} --requests {{bench_requests}} --warmup 20 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:latency_p50_ms",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"SB_SEED": "0", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}", "TOKENIZERS_PARALLELISM": "false"},
+        "expected_duration_s": [5, 900]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "python3 {{bench_script}} --requests {{screen_requests}} --warmup 10 2>&1 | grep -E '^METRIC '", "expected_duration_s": [2, 300]},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 6, "holdout": {"kind": "env", "var": "SB_SEED", "values": [1913, 8241, 6607]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["bench/", "benchmarks/", "{{bench_script}}"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{predict_function}}\\([^)]*\\)[^:]*:\\n)/$1    import time as _sb_t; _sb_t.sleep(0.005)\\n/' {{predict_module}}", "expected": "worse"},
+      "gaming_risks": ["a prediction cache keyed on the bench's input ids (SB_SEED must change the bench's sampled inputs; if it does not, switch to a dir holdout)", "warm-up requests excluded from timing while real users pay them (the cold_start-style cost moves to first call)", "a smaller or quantized model substituted without the accuracy floor moving because eval was also changed (eval is frozen; check eval_examples)", "batching inside the predict path that helps the bench's back-to-back calls but adds tail latency for single calls", "threads raised via OMP_NUM_THREADS or torch.set_num_threads outside a declared config hypothesis"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "throughput_qps",
+      "title": "Batched throughput, {{bench_script}}",
+      "kind": "diagnostic",
+      "direction": "maximize",
+      "unit": "qps",
+      "measure": {
+        "command": "python3 {{bench_script}} --requests {{bench_requests}} --warmup 20 --batch {{batch_size}} 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:throughput_qps",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"SB_SEED": "0", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [5, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 3, "max_repeats": 6, "holdout": {"kind": "env", "var": "SB_SEED", "values": [1913, 8241, 6607]}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["bench/", "benchmarks/", "{{bench_script}}"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{predict_function}}\\([^)]*\\)[^:]*:\\n)/$1    import time as _sb_t; _sb_t.sleep(0.005)\\n/' {{predict_module}}", "expected": "worse"},
+      "gaming_risks": ["queries counted before deduplication or after padding", "results returned before computation finishes (async futures) with the bench never awaiting them"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "eval_accuracy",
+      "title": "Accuracy on the frozen eval set",
+      "kind": "guardrail",
+      "direction": "maximize",
+      "unit": "fraction",
+      "measure": {
+        "command": "python3 {{eval_script}} --data {{eval_data_path}} 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:eval_accuracy",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"SB_SEED": "0", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [5, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["evaluate.py", "eval.py", "eval/", "data/eval*"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{predict_function}}\\([^)]*\\)[^:]*:\\n)/$1    import random as _sb_r\\n    if _sb_r.random() < 0.3: return {{wrong_prediction_expr}}\\n/' {{predict_module}}", "expected": "worse"},
+      "gaming_risks": ["quantization or pruning that drops accuracy inside the tolerance band on this eval but more on the holdout (the holdout card exists for this)", "the eval loader pointed at a subset (eval_examples guardrail)", "labels read by the predict path (a diff that opens the labels file anywhere outside evaluate.py is gamed)", "a lookup table over eval inputs (the SpecBench hash-table compiler case)"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "holdout_accuracy",
+      "title": "Accuracy on the held-out eval slice (confirm only)",
+      "kind": "guardrail",
+      "direction": "maximize",
+      "unit": "fraction",
+      "measure": {
+        "command": "python3 {{eval_script}} --data .strictlybetter/holdout/eval_holdout 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:eval_accuracy",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"SB_SEED": "0", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [5, 1800]
+      },
+      "fidelity": {"screen": {"skip": true}, "full": {"skip": true}, "confirm": {"repeats": 1, "max_repeats": 1, "holdout": {"kind": "dir", "name": "eval_holdout"}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["evaluate.py", "eval.py"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{predict_function}}\\([^)]*\\)[^:]*:\\n)/$1    import random as _sb_r\\n    if _sb_r.random() < 0.3: return {{wrong_prediction_expr}}\\n/' {{predict_module}}", "expected": "worse"},
+      "gaming_risks": ["a gain on eval_accuracy that does not appear here is the overfitting signature; the harness tracks the gap", "any diff that mentions .strictlybetter/holdout is gamed by definition"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "peak_mem_mb",
+      "title": "Peak resident memory of the bench process",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "MB",
+      "measure": {
+        "command": "python3 -c 'import resource,subprocess,sys; r=subprocess.run(\"python3 {{bench_script}} --requests {{screen_requests}} --warmup 5 >/dev/null 2>&1\", shell=True); m=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss; print(\"METRIC peak_mem_mb=%.1f\" % (m/(1024*1024) if sys.platform==\"darwin\" else m/1024)); sys.exit(r.returncode)'",
+        "parse": "metric-line:peak_mem_mb",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {"SB_SEED": "0", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [2, 600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 3}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.5},
+      "integrity": {"frozen_paths": ["bench/", "benchmarks/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{predict_function}}\\([^)]*\\)[^:]*:\\n)/$1    globals().setdefault(\"_sb_ballast\", bytearray(300_000_000))\\n/' {{predict_module}}", "expected": "worse"},
+      "gaming_risks": ["memory moved to the GPU where ru_maxrss does not see it (add a device-memory METRIC line to the bench if a GPU is involved)", "the model loaded lazily so the bench's short run never touches the largest layer"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "eval_examples",
+      "title": "Number of examples in the eval set",
+      "kind": "guardrail",
+      "direction": "equal",
+      "unit": "count",
+      "measure": {
+        "command": "[ -e {{eval_data_path}} ] || exit 3; python3 -c 'import os,sys; p=\"{{eval_data_path}}\"; n=sum(1 for _ in open(p, \"rb\")) if os.path.isfile(p) else sum(len(f) for _,_,f in os.walk(p)); print(\"METRIC eval_examples=%d\" % n)'",
+        "parse": "metric-line:eval_examples",
+        "cwd": ".",
+        "timeout_s": 60,
+        "env": {},
+        "expected_duration_s": [0, 60]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["data/eval*", "eval/"]},
+      "degradation": {"apply": "python3 -c \"import os; p='{{eval_data_path}}'; (open(p,'a').write('sb-degradation\\n') if os.path.isfile(p) else open(os.path.join(p,'sb_degradation.txt'),'w').write('x'))\"", "expected": "worse"},
+      "gaming_risks": ["the eval script filters examples after loading (the count here is of the file, not of what was scored; evaluate.py must print METRIC eval_examples too and the metrologist should compare)", "an eval path constant changed in the predict or eval wrapper"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [3, 3],
+    "algorithmic": [2, 4],
+    "allocation": [2, 4],
+    "caching": [2, 4],
+    "concurrency": [2, 4],
+    "dependency": [2, 5],
+    "test-add": [1, 5],
+    "bugfix": [2, 4],
+    "refactor-enabling": [1, 5],
+    "data": [1, 7],
+    "model": [2, 4],
+    "numerics": [3, 3],
+    "docs": [1, 9]
+  },
+  "noise_sources": ["batch composition and input length distribution (sample inputs with SB_SEED)", "warm-up: the first calls compile kernels or page in weights", "thread count and CPU frequency; pin OMP_NUM_THREADS", "GPU clocks and other tenants on the device", "memory allocator state between runs (each measurement is a fresh process)"],
+  "hygiene_guardrails": ["eval_accuracy", "eval_examples"],
+  "notes": "Latency is the goal, accuracy is the floor. The bench script must accept --requests, --warmup and optionally --batch, sample its inputs from SB_SEED, and print METRIC latency_p50_ms=, METRIC throughput_qps=; the eval script must print METRIC eval_accuracy= (rename to eval_f1, eval_wer with the right direction if the project's headline differs) and ideally METRIC eval_examples=. Both scripts are frozen. numerics is warm here because precision changes (fp16, int8, fused kernels) are the honest inference wins and also the most common way to lose accuracy on the holdout; the holdout_accuracy card and the tolerance on eval_accuracy are the pair that keeps them honest. If the model runs on a GPU, ru_maxrss is the wrong memory metric; have the bench print METRIC peak_device_mem_mb= and swap the card's command. Stack service-api if the model is served over HTTP and users care about socket latency."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "{{experiment_id}}",
+  "operator": "{{one of: config algorithmic allocation caching concurrency dependency test-add bugfix refactor-enabling data model numerics docs}}",
+  "target": "{{file path or file:symbol the diff will touch}}",
+  "hypothesis": "{{one or two sentences: what changes and why the goal should move}}",
+  "mechanism": "{{the causal story, grounded in a named diagnostic, a profile, or a ledger id; science projects must fill this}}",
+  "predicted": {
+    "{{goal_metric_id}}": "{{signed range with unit, e.g. -8..-20% or +0.01..0.03}}",
+    "{{guardrail_metric_id}}": "0"
+  },
+  "expected_diff_size": "small",
+  "est_cost_s": 90,
+  "evidence": "{{optional: which diagnostic or ledger entries this is grounded in}}",
+  "archive_refs": [],
+  "enables": null
+}

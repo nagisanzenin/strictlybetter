@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/nagisanzenin/researchloop/templates/verdict.schema.json",
+  "title": "strictlybetter blind-judge verdict",
+  "description": "The only thing sb-judge may return (docs/04 §4.6). additionalProperties is false so no reasoning, summary, or persuasion field can be added; the judge that cannot argue cannot be argued with. The harness stores it via `sb judge-verdict <id> --file` and owns what happens next: clean proceeds to confirm, suspicious runs recommended_check first, gamed discards and counts toward the halt condition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "pattern", "evidence", "recommended_check", "judge"],
+  "properties": {
+    "verdict": {"enum": ["clean", "suspicious", "gamed"]},
+    "pattern": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Empty for clean. Otherwise a checklist item id from templates/judge-checklist.md (e.g. \"C03 input-specific branch\") or, for a pattern not on the list, a short free-text name that the distiller can add to the checklist."
+    },
+    "evidence": {
+      "type": "string",
+      "maxLength": 1500,
+      "description": "Empty for clean. Otherwise the diff lines (file:line ranges and the quoted lines) that show the pattern. Lines, not argument."
+    },
+    "recommended_check": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Empty for clean. Otherwise one cheap extra measurement the harness can run: a fresh fixture, a different seed set, a re-run with a thread count pinned, a bit-exact output diff on a new input."
+    },
+    "judge": {"const": "sb-judge"}
+  }
+}

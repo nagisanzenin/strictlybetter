@@ -1,0 +1,176 @@
+{
+  "id": "data-pipeline",
+  "title": "Data pipeline (batch ETL, transforms, curation)",
+  "match": {
+    "any_files": ["dvc.yaml", "Snakefile", "dbt_project.yml", "pipeline.py", "etl.py", "flow.py", "Makefile", "airflow.cfg", "prefect.yaml"],
+    "any_dirs": ["dags", "flows", "pipelines", "models", "seeds", "data/raw", "data/processed", "data/golden", "golden", "expected"],
+    "languages": ["python", "sql", "scala", "rust", "go"],
+    "any_deps": ["pandas", "polars", "pyarrow", "duckdb", "dask", "pyspark", "dbt-core", "apache-airflow", "prefect", "dagster", "luigi", "great_expectations", "pandera"]
+  },
+  "confidence_notes": "Code whose job is to read data from one place and write transformed data to another, in batch. Signals: a DAG or workflow file, raw and processed data directories, golden or expected outputs, a schema or validation dependency, SQL models. Distinguish from ml-training (no optimizer loop) and science-sim (output is a dataset, not a scalar quality). If the transforms live in a package with tests, stack python-package. A golden output (a checked-in expected result for a fixed input) is the instrument; if none exists, the first campaign is an instrument campaign that records one from the current code and freezes it.",
+  "commands": {
+    "build": null,
+    "test": "python3 -m pytest -q tests",
+    "lint": "ruff check .",
+    "bench": "{{run_command}}",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "secrets/", "requirements*.txt", "uv.lock", "poetry.lock", "data/raw/", "data/golden/", "golden/", "expected/", "schemas/", "dvc.lock", "profiles.yml"],
+  "frozen_paths_hint": ["data/golden/", "golden/", "expected/", "schemas/", "tests/", "data/fixtures/", "fixtures/"],
+  "default_cards": [
+    {
+      "id": "runtime_s",
+      "title": "End-to-end wall-clock of `{{run_command}}` on the fixture input",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "s",
+      "measure": {
+        "command": "rm -rf {{output_dir}}; /usr/bin/time -p {{run_command}} 2>&1 >/dev/null",
+        "parse": "regex:real (\\d+\\.\\d+)",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"SB_INPUT": "{{fixture_input}}", "SB_OUTPUT": "{{output_dir}}", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}", "POLARS_MAX_THREADS": "{{threads}}"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "env": {"SB_INPUT": "{{screen_input}}"}, "expected_duration_s": [1, 900]},
+        "full": {"repeats": 2},
+        "confirm": {"repeats": 3, "max_repeats": 6, "env": {"SB_INPUT": ".strictlybetter/holdout/pipeline_input"}, "holdout": {"kind": "dir", "name": "pipeline_input"}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["data/fixtures/", "fixtures/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{transform_function}}\\([^)]*\\)[^:]*:\\n)/$1    import time as _sb_t; _sb_t.sleep(0.5)\\n/' {{transform_module}}", "expected": "worse"},
+      "gaming_risks": ["work skipped when the output already exists (the command removes the output dir first; a diff that writes to a different cache location is the workaround)", "rows dropped, columns dropped, or a transform stubbed (golden_diff_lines and row_count must hold)", "the fixture input detected by name or size and handled by a fast path (the holdout input exists for this)", "an intermediate cached on disk between screen and confirm outside the output dir", "thread count raised through the environment outside a declared config hypothesis"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "rows_per_s",
+      "title": "Output rows per second of wall-clock",
+      "kind": "diagnostic",
+      "direction": "maximize",
+      "unit": "rows/s",
+      "measure": {
+        "command": "rm -rf {{output_dir}}; python3 -c 'import subprocess,time,sys,os,glob\nt=time.perf_counter()\nr=subprocess.run(\"{{run_command}}\", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\ndt=time.perf_counter()-t\nif r.returncode: sys.exit(r.returncode)\nn=sum(sum(1 for _ in open(f, \"rb\")) - 1 for f in glob.glob(\"{{output_dir}}/*.csv\"))\nprint(\"METRIC rows_per_s=%.1f\" % (n/dt))'",
+        "parse": "metric-line:rows_per_s",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"SB_INPUT": "{{fixture_input}}", "SB_OUTPUT": "{{output_dir}}", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}", "POLARS_MAX_THREADS": "{{threads}}"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 3, "max_repeats": 6, "env": {"SB_INPUT": ".strictlybetter/holdout/pipeline_input"}, "holdout": {"kind": "dir", "name": "pipeline_input"}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["data/fixtures/", "fixtures/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{transform_function}}\\([^)]*\\)[^:]*:\\n)/$1    import time as _sb_t; _sb_t.sleep(0.5)\\n/' {{transform_module}}", "expected": "worse"},
+      "gaming_risks": ["duplicate rows emitted to inflate the numerator (row_count is an equal guardrail)", "rows counted from a file the pipeline no longer fully writes (parquet outputs are not counted here; adjust the glob to the real format)"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "golden_diff_lines",
+      "title": "Lines differing between sorted output and the golden output",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "lines",
+      "measure": {
+        "command": "rm -rf {{output_dir}}; {{run_command}} >/dev/null 2>&1 || exit 1; [ -f {{golden_path}} ] || exit 3; LC_ALL=C sort {{output_path}} > .sb-out.sorted; LC_ALL=C sort {{golden_path}} > .sb-gold.sorted; n=$(diff .sb-out.sorted .sb-gold.sorted | grep -c '^[<>]'); echo \"METRIC golden_diff_lines=$n\"",
+        "parse": "metric-line:golden_diff_lines",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"SB_INPUT": "{{fixture_input}}", "SB_OUTPUT": "{{output_dir}}", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["data/golden/", "golden/", "expected/", "data/fixtures/", "fixtures/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{transform_function}}\\([^)]*\\)[^:]*:\\n)/$1    globals()[\"_sb_drop\"] = True\\n/; s/(return\\s+)(\\w+)(\\s*\\n)/$1$2.head(len($2) - 1) if globals().get(\"_sb_drop\") and hasattr($2, \"head\") else $2$3/' {{transform_module}}", "expected": "worse"},
+      "gaming_risks": ["floating-point formatting changed so lines differ for a reason the pipeline's users would accept: the metrologist should decide the comparison tolerance at INSTRUMENT, not the experimenter later", "output written to a different path while {{output_path}} is stale or copied from golden (a diff that copies from a golden path is gamed)", "column order or sort order changed: the sort makes row order irrelevant, column order still matters", "the golden regenerated (frozen)"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "schema_violations",
+      "title": "Output columns missing from or extra to the declared schema",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "[ -f {{output_path}} ] || { rm -rf {{output_dir}}; {{run_command}} >/dev/null 2>&1 || exit 1; }; python3 -c 'import csv,json; h=next(csv.reader(open(\"{{output_path}}\", newline=\"\"))); exp=json.load(open(\"{{schema_path}}\"))[\"columns\"]; print(\"METRIC schema_violations=%d\" % len(set(exp) ^ set(h)))'",
+        "parse": "metric-line:schema_violations",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"SB_INPUT": "{{fixture_input}}", "SB_OUTPUT": "{{output_dir}}", "PYTHONHASHSEED": "0"},
+        "expected_duration_s": [0.1, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["schemas/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{transform_function}}\\([^)]*\\)[^:]*:\\n)/$1    globals()[\"_sb_rename\"] = True\\n/; s/(return\\s+)(\\w+)(\\s*\\n)/$1$2.rename(columns={list($2.columns)[0]: \"sb_degradation\"}) if globals().get(\"_sb_rename\") and hasattr($2, \"rename\") else $2$3/' {{transform_module}}", "expected": "worse"},
+      "gaming_risks": ["column names kept while their contents changed type or meaning (a pandera or great_expectations suite is the stronger instrument; use it when present)", "the schema file read from a non-frozen copy"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "row_count",
+      "title": "Output row count on the fixture input",
+      "kind": "guardrail",
+      "direction": "equal",
+      "unit": "rows",
+      "measure": {
+        "command": "[ -f {{output_path}} ] || { rm -rf {{output_dir}}; {{run_command}} >/dev/null 2>&1 || exit 1; }; n=$(( $(wc -l < {{output_path}} | tr -d ' ') - 1 )); echo \"METRIC row_count=$n\"",
+        "parse": "metric-line:row_count",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"SB_INPUT": "{{fixture_input}}", "SB_OUTPUT": "{{output_dir}}", "PYTHONHASHSEED": "0"},
+        "expected_duration_s": [0.05, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1, "env": {"SB_INPUT": ".strictlybetter/holdout/pipeline_input"}, "holdout": {"kind": "dir", "name": "pipeline_input"}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["data/fixtures/", "fixtures/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{transform_function}}\\([^)]*\\)[^:]*:\\n)/$1    globals()[\"_sb_drop\"] = True\\n/; s/(return\\s+)(\\w+)(\\s*\\n)/$1$2.head(len($2) - 1) if globals().get(\"_sb_drop\") and hasattr($2, \"head\") else $2$3/' {{transform_module}}", "expected": "worse"},
+      "gaming_risks": ["rows dropped and padded with duplicates to keep the count (golden_diff_lines catches it on the fixture, the holdout input catches a fixture-specific pad)", "a header-less output that shifts the count by one"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "peak_mem_mb",
+      "title": "Peak resident memory of the pipeline process tree",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "MB",
+      "measure": {
+        "command": "rm -rf {{output_dir}}; python3 -c 'import resource,subprocess,sys; r=subprocess.run(\"{{run_command}}\", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); m=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss; print(\"METRIC peak_mem_mb=%.1f\" % (m/(1024*1024) if sys.platform==\"darwin\" else m/1024)); sys.exit(r.returncode)'",
+        "parse": "metric-line:peak_mem_mb",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"SB_INPUT": "{{fixture_input}}", "SB_OUTPUT": "{{output_dir}}", "PYTHONHASHSEED": "0", "OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 3}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.5},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{transform_function}}\\([^)]*\\)[^:]*:\\n)/$1    globals().setdefault(\"_sb_ballast\", bytearray(400_000_000))\\n/' {{transform_module}}", "expected": "worse"},
+      "gaming_risks": ["ru_maxrss reports the largest single child, not the sum, for a multi-process pipeline (spark, dask): note it on the card and prefer the framework's own peak metric", "memory traded for runtime by spilling to disk without declaring it"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 3],
+    "algorithmic": [3, 3],
+    "allocation": [2, 4],
+    "caching": [3, 3],
+    "concurrency": [3, 3],
+    "dependency": [2, 4],
+    "test-add": [1, 5],
+    "bugfix": [2, 4],
+    "refactor-enabling": [1, 5],
+    "data": [3, 3],
+    "model": [1, 9],
+    "numerics": [1, 7],
+    "docs": [1, 9]
+  },
+  "noise_sources": ["I/O contention and page cache state (the first run after checkout reads from disk, later runs from cache; screen repeats should discard the first)", "thread pools sized from the machine (pin OMP_NUM_THREADS, POLARS_MAX_THREADS, RAYON_NUM_THREADS)", "a cloud or database source with variable latency (the fixture input must be local for the latency cards to mean anything)", "temporary files from a previous run left in the output dir (every timed command removes it first)"],
+  "hygiene_guardrails": ["golden_diff_lines", "schema_violations", "row_count"],
+  "notes": "The pipeline must read its input from SB_INPUT and write to SB_OUTPUT (or take equivalent flags the metrologist wires into {{run_command}}); the fixture input is a small, checked-in slice under data/fixtures/, the holdout input is a second slice the experimenter never sees, copied in by the harness under .strictlybetter/holdout/pipeline_input/. {{output_path}} is the main CSV the golden is checked against; for parquet or a database target replace the sort-and-diff with the framework's own comparison and keep the same METRIC line. dependency is warmer here than in most packs because moving a transform from pandas to polars or duckdb is the most common honest runtime win. Cost per run for a cloud pipeline is in the docs/07 table; it is not shipped as a card because it depends on the provider's billing API; if the project has a cost printout, wrap it as a metric-line card named cost_per_run_usd. golden_diff_lines with tolerance 0 is strict; if the pipeline is legitimately nondeterministic in float formatting, the metrologist rounds inside the comparison at INSTRUMENT and freezes that comparison script."
+}

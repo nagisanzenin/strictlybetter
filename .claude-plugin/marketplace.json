@@ -1,0 +1,14 @@
+{
+  "name": "strictlybetter",
+  "description": "A universal research loop for agentic coders. Every merge is strictly better: improved on a goal beyond measured noise, worse on nothing, confirmed on a holdout the experimenter never saw.",
+  "owner": {
+    "name": "nagisanzenin"
+  },
+  "plugins": [
+    {
+      "name": "strictlybetter",
+      "source": "./",
+      "description": "Universal noise-aware research loop: orient, discover metrics, measure sigma, pre-register experiments, blind-judge, confirm on holdout, keep only strictly-better changes."
+    }
+  ]
+}

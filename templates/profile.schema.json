@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/nagisanzenin/researchloop/templates/profile.schema.json",
+  "title": "strictlybetter profile",
+  "description": "The JSON sb-orienteer returns via --file. The harness validates it against this schema and renders templates/profile.md.tmpl from it. Section numbers in the template map to properties here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repo", "purpose", "archetypes", "commands", "constraints", "protected_paths", "frozen_paths", "notes"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "name", "head_commit"],
+      "properties": {
+        "root": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "default_branch": {"type": "string"},
+        "head_commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+        "languages": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "description": "What this project is for, in two sentences, taken from the project's own words (README, package description, paper abstract).",
+      "minLength": 20,
+      "maxLength": 800
+    },
+    "archetypes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every archetype that matched, best first. The first entry is primary; the rest are stacked packs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "confidence"],
+        "properties": {
+          "id": {"enum": ["rust-crate", "python-package", "node-frontend", "service-api", "cli-tool", "ml-training", "ml-inference", "science-sim", "data-pipeline", "docs-site", "library-generic"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "evidence": {"type": "string", "description": "Files, directories, or dependencies that produced the match."}
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build", "test", "lint", "bench", "run"],
+      "properties": {
+        "build": {"$ref": "#/definitions/maybe_command"},
+        "test": {"$ref": "#/definitions/maybe_command"},
+        "lint": {"$ref": "#/definitions/maybe_command"},
+        "typecheck": {"$ref": "#/definitions/maybe_command"},
+        "bench": {"$ref": "#/definitions/maybe_command"},
+        "run": {"$ref": "#/definitions/maybe_command"}
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "detail"],
+        "properties": {
+          "kind": {"enum": ["toolchain", "service", "data", "hardware", "network", "other"]},
+          "detail": {"type": "string", "minLength": 1},
+          "satisfied": {"type": ["boolean", "null"], "description": "Whether the constraint holds on the machine the orienteer ran on; null if not checked."}
+        }
+      }
+    },
+    "protected_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "frozen_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "existing_instruments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": {"enum": ["ci", "make-target", "script", "bench", "eval", "notebook", "readme-claim", "issue", "other"]},
+          "path": {"type": "string", "minLength": 1},
+          "command": {"type": ["string", "null"]},
+          "prints": {"type": "string", "description": "What number it emits and in what format, so the metrologist can wrap it as a card."}
+        }
+      }
+    },
+    "entry_points": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string", "description": "Section 9 of the profile: notes for the metrologist."},
+    "human_notes": {"type": "string", "description": "Section 10; the harness preserves the on-disk value across refreshes and ignores what the orienteer sends here."}
+  },
+  "definitions": {
+    "maybe_command": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "verified"],
+          "properties": {
+            "command": {"type": "string", "minLength": 1},
+            "verified": {"type": "boolean", "description": "True only if the orienteer executed it once and it exited as expected."},
+            "exit_code": {"type": ["integer", "null"]},
+            "duration_s": {"type": ["number", "null"], "minimum": 0},
+            "note": {"type": "string"}
+          }
+        }
+      ]
+    }
+  }
+}

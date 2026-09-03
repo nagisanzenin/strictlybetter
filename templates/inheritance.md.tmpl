@@ -1,0 +1,59 @@
+# Inheritance: {{repo_name}}
+
+Rewritten by `sb-distiller` at {{distilled_at}} after experiment `{{last_ledger_id}}` (campaign `{{campaign_id}}`, ledger lines {{ledger_range}}). This is an operations manual for a reader with no context, not a log. Every claim points to ledger ids. When this document and `ledger.jsonl` disagree, the ledger wins and the distiller is re-run. Section order is fixed (docs/08 §8.2).
+
+## 1. How to run the loop here
+
+Verified commands, machine requirements, how long a screen and a confirm take, what to do if a metric is quarantined.
+
+- Build: `{{build_command}}` ({{build_duration_s}} s). Test: `{{test_command}}` ({{test_duration_s}} s).
+- Screen round: about {{screen_round_s}} s for {{batch_size}} hypotheses. Confirm: about {{confirm_s}} s per candidate.
+- Machine: {{environment_fingerprint}}. Measurement must be serial for: {{serial_metrics}}.
+- Quarantined metrics and what unquarantines them: {{quarantine_notes}}
+- Start with `sb status` then `sb next`; trust them over anything remembered from a previous session.
+
+## 2. Current frontier
+
+Best confirmed value of every ratcheted metric, with sigma and the commit that set it.
+
+| Metric | Kind | Best confirmed | Sigma | Set by | Ledger id |
+|---|---|---|---|---|---|
+{{frontier_rows}}
+
+## 3. What works here
+
+Operator classes and targets with confirmed effect sizes, most reliable first. Form: "Allocation changes in `parse/` returned +4..12% four times (e0042, e0044, e0051, e0063). Config changes never exceeded noise (0 of 7)."
+
+{{what_works}}
+
+## 4. Dead ends
+
+Hypotheses tried and discarded, grouped by target and reason, with the diff hash so an agent can look at what was attempted. Do not retry these with the same mechanism. At exploration level 2 they may be revisited with a new mechanism, because the code has changed since.
+
+| Group | Tried | Reason | Ledger ids | Diff hashes |
+|---|---|---|---|---|
+{{dead_end_rows}}
+
+## 5. Noise realities
+
+Which metrics are noisy on this machine, measured sigmas per fidelity, quarantine decisions, whether repeats were raised, false-promotion rate and holdout-gap trend so far.
+
+{{noise_notes}}
+
+## 6. Open hypotheses
+
+Promising and untried, with why (cost, exploration level, blocked on a stepping stone). The next session's first batch should start here.
+
+{{open_hypotheses}}
+
+## 7. Gotchas
+
+Environment facts that cost time: a bench that needs a warm cache, a test that needs a service, a flag that silently changes measurement, a worktree quirk.
+
+{{gotchas}}
+
+## 8. Mechanisms (science projects)
+
+Explanations from pre-registrations that were confirmed, stated as the project's growing understanding. Each with the ledger id that confirmed it. Empty for non-science projects.
+
+{{mechanisms}}

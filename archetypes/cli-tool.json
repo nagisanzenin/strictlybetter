@@ -1,0 +1,176 @@
+{
+  "id": "cli-tool",
+  "title": "Command-line tool",
+  "match": {
+    "any_files": ["Cargo.toml", "pyproject.toml", "package.json", "go.mod", "main.go", "cmd/main.go"],
+    "any_dirs": ["cmd", "src/bin", "completions", "man"],
+    "languages": ["rust", "go", "python", "typescript", "javascript", "c", "cpp", "zig"],
+    "any_deps": ["clap", "argh", "structopt", "cobra", "urfave/cli", "click", "typer", "argparse", "commander", "yargs", "oclif"]
+  },
+  "confidence_notes": "A binary whose interface is argv. Signals: a [[bin]] target or a bin field with an argument-parsing dependency, a completions/ or man/ directory, a --help snapshot in tests, no listening socket. Stacks with the language pack (rust-crate, python-package) for hygiene guardrails. If the tool's main mode is a long-running server (--serve is the default), it is service-api. If it is a library with a thin CLI wrapper, keep library-generic or the language pack as primary and this as secondary. Golden-output tests (run the tool on fixtures, compare stdout) are the strongest instrument a CLI can have; if they exist, they are frozen and they outrank anything here.",
+  "commands": {
+    "build": "{{build_command}}",
+    "test": "{{test_command}}",
+    "lint": "{{lint_command}}",
+    "bench": "hyperfine -N --warmup 5 '{{bin_path}} {{bench_args}}'",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "secrets/", "Cargo.lock", "package-lock.json", "poetry.lock", "uv.lock", "go.sum", "completions/", "man/"],
+  "frozen_paths_hint": ["tests/", "test/", "tests/snapshots/", "tests/fixtures/", "tests/golden/", "testdata/", "fixtures/"],
+  "default_cards": [
+    {
+      "id": "tests_failed",
+      "title": "Test suite failed (exit status of {{test_command}})",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "{{test_command}} >/dev/null 2>&1; rc=$?; echo \"METRIC tests_failed=$rc\"",
+        "parse": "metric-line:tests_failed",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1", "NO_COLOR": "1"},
+        "expected_duration_s": [0.5, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["tests/", "testdata/", "fixtures/"]},
+      "degradation": {"apply": "{{break_one_function_command}}", "expected": "worse"},
+      "gaming_risks": ["golden files regenerated (frozen; look for a diff that changes where golden files are read from)", "a test that shells out to the binary pointed at a different binary or a stale build", "exit status is the runner's, not a count: prefer the language pack's counting card when both are present"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "startup_ms",
+      "title": "Startup: median wall-clock of `{{bin_path}} --version`",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "ms",
+      "measure": {
+        "command": "command -v hyperfine >/dev/null 2>&1 || exit 3; {{build_command}} >/dev/null 2>&1 || exit 1; hyperfine -N --warmup 5 --runs 30 --export-json .sb-hf.json '{{bin_path}} --version' >/dev/null 2>&1 || exit 1; python3 -c 'import json; print(\"METRIC startup_ms=%.3f\" % (json.load(open(\".sb-hf.json\"))[\"results\"][0][\"median\"]*1000))'",
+        "parse": "metric-line:startup_ms",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {"NO_COLOR": "1"},
+        "expected_duration_s": [0.5, 600]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "command -v hyperfine >/dev/null 2>&1 || exit 3; {{build_command}} >/dev/null 2>&1 || exit 1; hyperfine -N --warmup 3 --runs 10 --export-json .sb-hf.json '{{bin_path}} --version' >/dev/null 2>&1 || exit 1; python3 -c 'import json; print(\"METRIC startup_ms=%.3f\" % (json.load(open(\".sb-hf.json\"))[\"results\"][0][\"median\"]*1000))'"},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 6, "command": "command -v hyperfine >/dev/null 2>&1 || exit 3; {{build_command}} >/dev/null 2>&1 || exit 1; hyperfine -N --warmup 5 --runs 30 --export-json .sb-hf.json '{{bin_path}} {holdout}' >/dev/null 2>&1 || exit 1; python3 -c 'import json; print(\"METRIC startup_ms=%.3f\" % (json.load(open(\".sb-hf.json\"))[\"results\"][0][\"median\"]*1000))'", "holdout": {"kind": "arg", "values": ["{{holdout_subcommand_1}} --help", "{{holdout_subcommand_2}} --help"]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "{{add_startup_work_command}}", "expected": "worse"},
+      "gaming_risks": ["--version special-cased to exit before initialization while every real subcommand still pays it (the holdout subcommands exist for this)", "initialization made lazy in a way that breaks a subcommand the tests do not cover", "a static or musl build, or a different opt-level, substituted in the build command outside a declared config hypothesis", "shell completion or plugin discovery skipped when NO_COLOR or CI is set"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "binary_bytes",
+      "title": "Built binary size",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "bytes",
+      "measure": {
+        "command": "{{build_command}} >/dev/null 2>&1 || exit 1; [ -f {{bin_path}} ] || exit 1; printf 'METRIC binary_bytes=%s\\n' \"$(wc -c < {{bin_path}} | tr -d ' ')\"",
+        "parse": "metric-line:binary_bytes",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {},
+        "expected_duration_s": [0.1, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "{{embed_large_static_command}}", "expected": "worse"},
+      "gaming_risks": ["a feature or subcommand removed", "assets moved out of the binary into files loaded at runtime (the tool now fails when run from another directory)", "strip, lto, opt-level=z, upx applied outside a declared config hypothesis; upx in particular trades size for startup time", "a smaller binary at {{bin_path}} that is not the one tests exercise"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "help_snapshot_diff_lines",
+      "title": "Lines differing between `--help` and the frozen snapshot",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "lines",
+      "measure": {
+        "command": "{{build_command}} >/dev/null 2>&1 || exit 1; [ -f {{help_snapshot}} ] || exit 3; n=$({{bin_path}} --help 2>&1 | diff - {{help_snapshot}} | grep -c '^[<>]'); echo \"METRIC help_snapshot_diff_lines=$n\"",
+        "parse": "metric-line:help_snapshot_diff_lines",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {"NO_COLOR": "1", "COLUMNS": "100"},
+        "expected_duration_s": [0.1, 600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["{{help_snapshot}}"]},
+      "degradation": {"apply": "{{remove_one_flag_command}}", "expected": "worse"},
+      "gaming_risks": ["the snapshot regenerated (frozen)", "help text kept identical while the flag it documents stopped working (tests must cover flags, not just help)", "a terminal-width or color detection change that reflows help only when COLUMNS is unset"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "completion_failed",
+      "title": "Shell completion script generates and parses",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bool",
+      "measure": {
+        "command": "{{build_command}} >/dev/null 2>&1 || exit 1; if {{bin_path}} {{completion_subcommand}} bash 2>/dev/null | bash -n; then echo METRIC completion_failed=0; else echo METRIC completion_failed=1; fi",
+        "parse": "metric-line:completion_failed",
+        "cwd": ".",
+        "timeout_s": 60,
+        "env": {},
+        "expected_duration_s": [0.05, 60]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["completions/"]},
+      "degradation": {"apply": "{{break_completion_command}}", "expected": "worse"},
+      "gaming_risks": ["the completion subcommand made to print an empty script (bash -n accepts empty input): pair with the help snapshot so a vanished subcommand is seen", "completions generated from a stale static file instead of the live command tree"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "subcommands_with_help",
+      "title": "Subcommands whose --help exits 0",
+      "kind": "diagnostic",
+      "direction": "maximize",
+      "unit": "count",
+      "measure": {
+        "command": "{{build_command}} >/dev/null 2>&1 || exit 1; n=0; for s in $({{bin_path}} --help 2>&1 | awk '/^(Commands|SUBCOMMANDS|Available Commands):/{f=1; next} /^[A-Za-z]+:/{f=0} f && $1 ~ /^[a-z][a-z0-9-]*$/ {print $1}'); do {{bin_path}} \"$s\" --help >/dev/null 2>&1 && n=$((n+1)); done; echo \"METRIC subcommands_with_help=$n\"",
+        "parse": "metric-line:subcommands_with_help",
+        "cwd": ".",
+        "timeout_s": 120,
+        "env": {"NO_COLOR": "1", "COLUMNS": "100"},
+        "expected_duration_s": [0.05, 120]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "{{remove_one_subcommand_help_command}}", "expected": "worse"},
+      "gaming_risks": ["trivial subcommands added to raise the count (the help snapshot guardrail moves if so)", "the Commands: header renamed so the parser finds nothing and the count silently drops to zero at baseline (quarantine, not a pass)"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 3],
+    "algorithmic": [2, 4],
+    "allocation": [2, 4],
+    "caching": [1, 5],
+    "concurrency": [1, 6],
+    "dependency": [2, 4],
+    "test-add": [2, 3],
+    "bugfix": [2, 3],
+    "refactor-enabling": [1, 5],
+    "data": [1, 9],
+    "model": [1, 9],
+    "numerics": [1, 8],
+    "docs": [2, 5]
+  },
+  "noise_sources": ["shell startup and dynamic loader cache on the first run after a build (hyperfine --warmup handles it)", "disk cache state for a binary that reads config or plugin directories at start", "terminal width and color detection changing help output (pin COLUMNS and NO_COLOR)", "antivirus or Gatekeeper scanning a freshly built binary on macOS on its first execution"],
+  "hygiene_guardrails": ["tests_failed"],
+  "notes": "Stack on the language pack for tests, lint and typecheck; use this pack for the user-facing surface. Fill {{bin_path}} with the built binary (target/release/{{name}}, dist/{{name}}, or the venv script), {{build_command}} with the release build, {{help_snapshot}} with a checked-in --help transcript under tests/ (create one at INSTRUMENT if missing and freeze it), {{completion_subcommand}} with whatever prints completions (completions, completion, generate-completions). The startup holdout runs a real subcommand's --help instead of --version so a --version fast path cannot fake the win. dependency is warm here because swapping a heavy argument parser or a regex engine is the most common honest startup and size win in CLIs. The degradation placeholders are per-language: for Rust append a #[used] static for size, add a std::thread::sleep in main for startup, and rename a flag in the clap derive for the help snapshot."
+}

@@ -62,5 +62,6 @@
     "the checksum depends on SB_SEED and SB_BENCH_SIZE: compare only against a baseline measured with the same env"
   ],
   "contention_safe": false,
-  "noise": null
+  "noise": null,
+  "reuse_output": true
 }

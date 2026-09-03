@@ -1,0 +1,62 @@
+# strictlybetter campaign report: {{campaign_id}}
+
+Branch `{{branch}}` from `{{base_commit}}` to `{{head_commit}}`. {{experiments_run}} experiments, {{accepted_count}} accepted, {{start_date}} to {{end_date}}. Status: {{status}}{{halt_reason_suffix}}.
+
+This report is the pull-request description (docs/08 §8.5). A reviewer who reads only it should know what changed, how much it helped, how sure the loop is, and what it cost. Nothing here was written by the experimenter; the numbers are the harness's confirmation measurements.
+
+## Goals
+
+| Metric | Direction | Before | After | Change | Sigma | Accepted changes |
+|---|---|---|---|---|---|---|
+{{goal_rows}}
+
+## Guardrails
+
+| Metric | Floor (ratchet) | Final | Status |
+|---|---|---|---|
+{{guardrail_rows}}
+
+Hygiene guardrails were present throughout. The global ratchet inherited from earlier campaigns: {{inherited_ratchet}}.
+
+## Cost
+
+| | Value |
+|---|---|
+| Dollars | {{dollars}} |
+| Wall-clock hours | {{hours}} |
+| Experiments run / promoted / confirmed / accepted | {{experiments_run}} / {{promoted}} / {{confirmed}} / {{accepted_count}} |
+| Cost per accepted improvement | ${{dollars_per_accept}}, {{minutes_per_accept}} min |
+| False-promotion rate (screen said yes, confirm said no) | {{false_promotion_rate}} |
+| Judge overhead (share of spend) | {{judge_overhead}} |
+| Holdout gap trend (screen gain minus confirm gain, accepted changes) | {{holdout_gap_trend}} |
+
+## Accepted commits
+
+One line each: ledger id, operator, target, confirmed effect with sigma, judge verdict, confirmation repeats. Every commit message on the branch carries the same block (docs/09 §9.5).
+
+{{accepted_commit_lines}}
+
+## What the judge flagged
+
+Promoted candidates marked `suspicious` or `gamed`, the pattern, and the extra check that cleared or discarded them. A reviewer should read these diffs first.
+
+{{judge_flags}}
+
+## Discards by reason
+
+| Reason | Count |
+|---|---|
+{{discard_rows}}
+
+## What the distiller recommends next
+
+{{recommendation}}
+
+## How to check this on your machine
+
+```
+git checkout {{branch}}
+sb measure --confirm {{goal_metric_id}}
+```
+
+Confirmation numbers above should reproduce within their sigma. The full experiment history is `.strictlybetter/ledger.jsonl` on this branch; the cold-start manual is `.strictlybetter/inheritance.md`.

@@ -75,6 +75,9 @@ GAMED_HALT_AFTER = 2        # consecutive gamed verdicts
 HARNESS_ERROR_HALT_AFTER = 3
 DEFAULT_ITERATION_CAP = 200
 DEFAULT_PRICING = {"in_per_mtok": 5.0, "out_per_mtok": 25.0}  # estimate only
+TIME_UNITS = {"ms", "s", "sec", "secs", "seconds", "ns", "us", "µs", "minutes", "min"}
+WALL_DIVERGENCE_INSTR = 0.5   # instrument claims at least 2x faster ...
+WALL_DIVERGENCE_WALL = 0.9    # ... while the process wall-clock barely moved
 
 OPERATORS = ["config", "algorithmic", "allocation", "caching", "concurrency",
              "dependency", "test-add", "bugfix", "refactor-enabling", "data",
@@ -510,6 +513,9 @@ def card_sign(card: dict) -> int:
 # ----------------------------------------------------------------------------
 # Measurement
 # ----------------------------------------------------------------------------
+_OUTPUT_CACHE: dict = {}
+
+
 def measure_once(card: dict, level: str, checkout: str, holdout_value=None, extra_env=None) -> dict:
     spec = fidelity_spec(card, level)
     cmd = spec["command"]
@@ -525,7 +531,17 @@ def measure_once(card: dict, level: str, checkout: str, holdout_value=None, extr
         elif ho.get("kind") == "arg":
             cmd = cmd.replace("{holdout}", str(holdout_value))
     cwd = os.path.join(checkout, spec["cwd"]) if spec["cwd"] not in (".", "") else checkout
-    rc, out, err, secs = run_cmd(cmd, cwd=cwd, env=env, timeout=spec["timeout_s"])
+    # reuse_output: a card that only re-parses another card's command (a checksum next to a
+    # timing) may reuse the most recent identical run in this process instead of paying twice.
+    key = json.dumps([cwd, cmd, {k: v for k, v in env.items() if k != "SB_METRIC"}], sort_keys=True)
+    cached = _OUTPUT_CACHE.get(key) if card.get("reuse_output") else None
+    if cached is not None:
+        rc, out, err, secs = cached
+    else:
+        rc, out, err, secs = run_cmd(cmd, cwd=cwd, env=env, timeout=spec["timeout_s"])
+        _OUTPUT_CACHE[key] = (rc, out, err, secs)
+        if len(_OUTPUT_CACHE) > 64:
+            _OUTPUT_CACHE.pop(next(iter(_OUTPUT_CACHE)))
     rec = {"rc": rc, "secs": round(secs, 4), "value": None, "valid": True, "invalid_reason": None,
            "holdout": holdout_value, "stdout_tail": out[-800:], "stderr_tail": err[-800:]}
     try:
@@ -556,6 +572,21 @@ def summarize(runs: list, card: dict) -> dict:
             "median": None, "sigma": None, "valid": False}
     if not vals:
         return summ
+    if card.get("direction") == "equal":
+        # Per-holdout canonical form: an equal-direction metric may legitimately differ per
+        # seed/slice, so the value is the sorted set of (holdout -> value) pairs, and it is
+        # invalid only when the same holdout yields different values across repeats.
+        by_h: dict = {}
+        for r in runs:
+            if r.get("valid") and r.get("value") is not None:
+                by_h.setdefault(str(r.get("holdout")), set()).add(str(r["value"]))
+        if any(len(v) > 1 for v in by_h.values()):
+            summ["invalid"].append("non-deterministic value for an equal-direction metric")
+            return summ
+        summ["median"] = "|".join(f"{k}={next(iter(v))}" for k, v in sorted(by_h.items()))
+        summ["sigma"] = 0.0
+        summ["valid"] = True
+        return summ
     if all(isinstance(v, float) for v in vals):
         summ["median"] = median(vals)
         summ["sigma"] = sigma_of(vals)
@@ -563,9 +594,6 @@ def summarize(runs: list, card: dict) -> dict:
         svals = [str(v) for v in vals]
         summ["median"] = svals[-1]
         summ["sigma"] = 0.0 if len(set(svals)) == 1 else None
-        if len(set(svals)) > 1 and card.get("direction") == "equal":
-            summ["invalid"].append("non-deterministic value for an equal-direction metric")
-            return summ
     summ["valid"] = True
     return summ
 
@@ -599,6 +627,10 @@ def measure_card(home: Home, card: dict, level: str, checkout: str, repeats: int
         src = home.p("holdout", ho.get("name", card["id"]))
         if os.path.isdir(src):
             shutil.copytree(src, os.path.join(checkout, ho.get("dest", ho.get("name", card["id"]))), dirs_exist_ok=True)
+    if card.get("direction") == "equal" and hvals:
+        repeats = len(hvals)  # one canonical pass over the holdout set
+    if not card.get("reuse_output"):
+        _OUTPUT_CACHE.clear()  # a fresh run starts a new reuse epoch; only reuse_output cards read the cache
     runs = []
     with measurement_lock(home, card):
         for i in range(repeats):
@@ -706,13 +738,15 @@ def kappa_eff(kappa: float, diff_lines: int, new_deps: int) -> float:
     return kappa * (1.0 + LAMBDA_COMPLEXITY * math.log(1.0 + max(0, diff_lines) / DIFF_REF_LINES)) + NEW_DEP_PENALTY * max(0, new_deps)
 
 
-def baseline_level(baseline: dict, mid: str, level: str) -> dict | None:
+def baseline_level(baseline: dict, mid: str, level: str, strict: bool = False) -> dict | None:
     b = baseline.get(mid)
     if not b:
         return None
     levels = b.get("levels", {})
     if level in levels:
         return levels[level]
+    if strict:
+        return None
     if "confirm" in levels:
         return levels["confirm"]
     if levels:
@@ -1047,6 +1081,7 @@ def cmd_card_probe(home: Home, args) -> int:
     try:
         before = measure_card(home, card, "screen", path, repeats=max(1, args.repeats), use_holdout=False)
         rc, out, err, _ = run_cmd(deg["apply"], cwd=path, env={"PYTHONDONTWRITEBYTECODE": "1"}, timeout=300)
+        _OUTPUT_CACHE.clear()  # the tree changed; nothing measured before the degradation may be reused
         for root_, dirs_, _files in os.walk(path):
             for d_ in [d for d in dirs_ if d == "__pycache__"]:
                 shutil.rmtree(os.path.join(root_, d_), ignore_errors=True)
@@ -1085,7 +1120,7 @@ def cmd_baseline(home: Home, args) -> int:
     if not ids:
         raise SBError("no metric cards to baseline")
     k = int(args.repeats or BASELINE_REPEATS)
-    levels = [l for l in (args.levels.split(",") if args.levels else ["screen", "confirm"])]
+    forced_levels = args.levels.split(",") if args.levels else None
     path = worktree_new(home, "_baseline", commit)
     baseline = home.baseline()
     try:
@@ -1093,6 +1128,7 @@ def cmd_baseline(home: Home, args) -> int:
             card = home.load_card(mid)
             entry = baseline.get(mid) or {}
             entry.setdefault("levels", {})
+            levels = forced_levels or (["screen"] + (["full"] if (card.get("fidelity") or {}).get("full") else []) + ["confirm"])
             for level in levels:
                 reps = 1 if card.get("contention_safe") and card["direction"] == "equal" else k
                 s = measure_card(home, card, level, path, repeats=reps, campaign=c, use_holdout=(level == "confirm"))
@@ -1324,6 +1360,9 @@ def cmd_submit(home: Home, args) -> int:
         home.save_campaign(c)
         if c["consecutive_integrity"] >= INTEGRITY_HALT_AFTER:
             halt(home, c, "integrity:" + ";".join(violations))
+    else:
+        c["consecutive_integrity"] = 0
+        home.save_campaign(c)
     print(json.dumps({"id": eid, "ok": ok, "commit": commit, "diff_lines": ds["diff_lines"], "files": ds["files"], "violations": violations}))
     return 0 if ok else 1
 
@@ -1379,11 +1418,26 @@ def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict) -> 
     for mid in list(c["goals"]) + list(c["guardrails"]):
         card = cards[mid]
         meas = results.get(mid) or {"valid": False, "invalid": ["not measured"]}
-        base = baseline_level(b, mid, level)
+        base = baseline_level(b, mid, level, strict=(card["direction"] == "equal"))
         kap = float((card.get("acceptance") or {}).get("kappa", KAPPA))
         tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA))
         ke_card = kappa_eff(kap, int(r.get("diff_lines") or 0), len(r.get("new_deps") or [])) if c.get("walls", {}).get("noise_floor", True) else 0.0
-        comps.append(compare_metric(card, base, meas, ke_card, tol, c.get("walls", {})))
+        comp = compare_metric(card, base, meas, ke_card, tol, c.get("walls", {}))
+        if c.get("walls", {}).get("validity", True) and comp.get("valid") and base and card.get("direction") == "minimize" \
+                and str(card.get("unit", "")).lower() in TIME_UNITS and comp.get("improved"):
+            # ratio of what the instrument claims vs what the harness observed
+            try:
+                instr_ratio = float(meas["median"]) / float(base["median"]) if float(base["median"]) > 0 else None
+                wall_new = float(meas.get("secs_total", 0)) / max(1, int(meas.get("n", 1)))
+                wall_base = float(base.get("secs_per_run") or 0)
+                wall_ratio = (wall_new / wall_base) if wall_base > 0 else None
+            except (TypeError, ValueError):
+                instr_ratio = wall_ratio = None
+            if instr_ratio is not None and wall_ratio is not None and instr_ratio < WALL_DIVERGENCE_INSTR and wall_ratio > WALL_DIVERGENCE_WALL:
+                comp["valid"] = False
+                comp["improved"] = False
+                comp["note"] = f"instrument claims {instr_ratio:.2f}x of baseline but process wall-clock is {wall_ratio:.2f}x (timer or instrument tampering?)"
+        comps.append(comp)
     c["_kappa_eff"] = ke
     return comps, ke
 

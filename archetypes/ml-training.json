@@ -1,0 +1,202 @@
+{
+  "id": "ml-training",
+  "title": "ML training run (fixed budget, one headline metric)",
+  "match": {
+    "any_files": ["train.py", "train.sh", "prepare.py", "configs/train.yaml", "config/train.yaml", "hydra.yaml", "accelerate_config.yaml"],
+    "any_dirs": ["data", "checkpoints", "runs", "wandb", "configs"],
+    "languages": ["python"],
+    "any_deps": ["torch", "jax", "flax", "tensorflow", "keras", "lightning", "pytorch-lightning", "transformers", "accelerate", "deepspeed", "xgboost", "lightgbm", "sklearn", "scikit-learn"]
+  },
+  "confidence_notes": "A script that consumes data and a time or step budget and prints a validation number. Signals: train.py with an optimizer loop, a data preparation script, checkpoint or run directories, a deep-learning or gradient-boosting dependency. If the repo only loads a saved model and serves or scores it, it is ml-inference. If there is a package with tests around it, stack python-package for hygiene. Ask for the autoresearch shape explicitly: a fixed wall-clock or step budget read from an environment variable, a seed read from an environment variable, and a METRIC val_bpb=<x> (or val_loss, val_acc) line at the end. If the script lacks these, the first campaign is an instrument campaign that adds them (the script becomes the instrument and is frozen afterwards). A run that cannot finish on the available hardware inside ten minutes has no cheap screen fidelity; the profile must say so and the batch size will be small.",
+  "commands": {
+    "build": null,
+    "test": "python3 -m pytest -q tests",
+    "lint": "ruff check .",
+    "bench": "SB_TIME_BUDGET_S=300 SB_SEED=0 python3 train.py",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "secrets/", "requirements*.txt", "uv.lock", "poetry.lock", "data/raw/", "data/val*", "data/test*", "prepare.py", "prepare_data.py", "tokenizer/", "evaluate.py", "eval.py"],
+  "frozen_paths_hint": ["evaluate.py", "eval.py", "eval/", "data/val*", "data/test*", "tests/", "tokenizer/", "metrics/"],
+  "default_cards": [
+    {
+      "id": "val_bpb",
+      "title": "Validation bits per byte after a fixed {{budget_s}}s budget",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "bpb",
+      "measure": {
+        "command": "python3 {{train_script}} 2>&1 | grep -E '^METRIC ' ",
+        "parse": "metric-line:val_bpb",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"SB_TIME_BUDGET_S": "{{budget_s}}", "SB_SEED": "0", "PYTHONHASHSEED": "0", "CUBLAS_WORKSPACE_CONFIG": ":4096:8", "TOKENIZERS_PARALLELISM": "false", "WANDB_MODE": "disabled"},
+        "expected_duration_s": ["{{budget_s}} * 0.9", "{{budget_s}} * 1.25"]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "env": {"SB_TIME_BUDGET_S": "{{screen_budget_s}}"}, "expected_duration_s": ["{{screen_budget_s}} * 0.9", "{{screen_budget_s}} * 1.25"]},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 5, "holdout": {"kind": "env", "var": "SB_SEED", "values": [1913, 8241, 6607]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["evaluate.py", "eval.py", "data/val*", "tokenizer/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(lr\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 100/' {{train_script}}", "expected": "worse"},
+      "gaming_risks": ["training on the validation split, or a data loader that yields val examples under the train key (the eval_bytes card and frozen data/val* catch the file; a diff to the loader's split logic is the tell)", "the time budget read from SB_TIME_BUDGET_S ignored or extended (validity band on duration is tight for this reason)", "evaluation narrowed: fewer val batches, a shorter context, a subset chosen by loss (evaluate.py is frozen; a diff that adds an eval limit inside train.py is the workaround)", "the model replaced by something that does not learn: a lookup, a retrieval index over the val set, an n-gram cache of val text (the Gomoku case)", "seed-specific luck: a gain that vanishes on the holdout seeds is not a gain", "nondeterministic kernels enabled to widen variance and then selecting the best of several screen runs (only one screen run per experiment is recorded)", "reporting bpb on a different tokenizer or byte count (tokenizer/ is frozen; check the bytes denominator is unchanged)"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "test_bpb",
+      "title": "Held-out test-split bits per byte (confirm only)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bpb",
+      "measure": {
+        "command": "python3 {{eval_script}} --split .strictlybetter/holdout/test_split --checkpoint {{checkpoint_path}} 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:test_bpb",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {"SB_SEED": "0", "PYTHONHASHSEED": "0", "CUBLAS_WORKSPACE_CONFIG": ":4096:8"},
+        "expected_duration_s": [5, 600]
+      },
+      "fidelity": {
+        "screen": {"skip": true},
+        "full": {"skip": true},
+        "confirm": {"repeats": 1, "max_repeats": 1, "holdout": {"kind": "dir", "name": "test_split"}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["evaluate.py", "eval.py"]},
+      "degradation": {"apply": "perl -0pi -e 's/(lr\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 100/' {{train_script}}", "expected": "worse"},
+      "gaming_risks": ["this card exists to catch val-split overfitting: a val_bpb gain with no test_bpb movement is the signature", "the checkpoint evaluated is not the one the val number came from (the harness must run it in the same clean checkout right after the confirm training run)", "the experimenter never sees .strictlybetter/holdout/; a diff that references that path is gamed by definition"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "determinism_gap",
+      "title": "|val_bpb(run A) - val_bpb(run B)| at the same seed and step budget",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bpb",
+      "measure": {
+        "command": "a=$(python3 {{train_script}} 2>/dev/null | sed -n 's/^METRIC val_bpb=//p'); b=$(python3 {{train_script}} 2>/dev/null | sed -n 's/^METRIC val_bpb=//p'); [ -n \"$a\" ] && [ -n \"$b\" ] || exit 1; python3 -c \"print('METRIC determinism_gap=%.6f' % abs(float('$a') - float('$b')))\"",
+        "parse": "metric-line:determinism_gap",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {"SB_MAX_STEPS": "{{determinism_steps}}", "SB_TIME_BUDGET_S": "0", "SB_SEED": "0", "PYTHONHASHSEED": "0", "CUBLAS_WORKSPACE_CONFIG": ":4096:8", "WANDB_MODE": "disabled"},
+        "expected_duration_s": [10, 600]
+      },
+      "fidelity": {"screen": {"skip": true}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(torch\\.manual_seed\\([^)]*\\))/$1; torch.use_deterministic_algorithms(False); import random as _sb_r; _sb_r.seed()/' {{train_script}}", "expected": "worse"},
+      "gaming_risks": ["nondeterminism introduced deliberately so the screen run can be re-rolled (this card widens; the judge should look for removed seed calls or new use_deterministic_algorithms(False))", "SB_MAX_STEPS ignored so both runs train to different points and the gap is dominated by budget, not kernels"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "train_loss",
+      "title": "Final training loss of a short run (sanity: no NaN, no memorization signature)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "nats",
+      "measure": {
+        "command": "python3 {{train_script}} 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:train_loss",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_TIME_BUDGET_S": "{{screen_budget_s}}", "SB_SEED": "0", "PYTHONHASHSEED": "0", "CUBLAS_WORKSPACE_CONFIG": ":4096:8", "WANDB_MODE": "disabled"},
+        "expected_duration_s": ["{{screen_budget_s}} * 0.9", "{{screen_budget_s}} * 1.25"]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 2.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(lr\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 100/' {{train_script}}", "expected": "worse"},
+      "gaming_risks": ["val improves while train loss does not move: eval leakage or an eval-time trick rather than learning", "train loss far below val: memorization; combined with a val gain it usually means the val set leaked into training", "NaN printed as a number (the parser must reject nan; the harness validity check treats a non-finite value as invalid)"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "tokens_per_s",
+      "title": "Training throughput of a short run",
+      "kind": "diagnostic",
+      "direction": "maximize",
+      "unit": "tokens/s",
+      "measure": {
+        "command": "python3 {{train_script}} 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:tokens_per_s",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_TIME_BUDGET_S": "{{screen_budget_s}}", "SB_SEED": "0", "PYTHONHASHSEED": "0", "WANDB_MODE": "disabled"},
+        "expected_duration_s": ["{{screen_budget_s}} * 0.9", "{{screen_budget_s}} * 1.25"]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 3}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(optimizer\\.step\\(\\))/$1; import time as _sb_t; _sb_t.sleep(0.02)/' {{train_script}}", "expected": "worse"},
+      "gaming_risks": ["tokens counted before packing or padding so the number inflates without more learning", "a smaller model or shorter context substituted (val_bpb should get worse; if it does not, the eval changed too)"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "peak_mem_mb",
+      "title": "Peak device memory of a short run",
+      "kind": "diagnostic",
+      "direction": "minimize",
+      "unit": "MB",
+      "measure": {
+        "command": "python3 {{train_script}} 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:peak_mem_mb",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_TIME_BUDGET_S": "{{screen_budget_s}}", "SB_SEED": "0", "PYTHONHASHSEED": "0", "WANDB_MODE": "disabled"},
+        "expected_duration_s": ["{{screen_budget_s}} * 0.9", "{{screen_budget_s}} * 1.25"]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(batch_size\\s*=\\s*)(\\d+)/${1}$2 * 4/' {{train_script}}", "expected": "worse"},
+      "gaming_risks": ["memory measured before the largest allocation (the script must report max_memory_allocated at the end, and the report line is inside the frozen instrument or in the train script under judge review)", "gradient checkpointing or a smaller batch traded for throughput without declaring it"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "eval_bytes",
+      "title": "Size of the validation file (eval narrowing detector)",
+      "kind": "guardrail",
+      "direction": "equal",
+      "unit": "bytes",
+      "measure": {
+        "command": "[ -f {{val_data_path}} ] || exit 3; printf 'METRIC eval_bytes=%s\\n' \"$(wc -c < {{val_data_path}} | tr -d ' ')\"",
+        "parse": "metric-line:eval_bytes",
+        "cwd": ".",
+        "timeout_s": 30,
+        "env": {},
+        "expected_duration_s": [0, 10]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["data/val*"]},
+      "degradation": {"apply": "truncate -s 50% {{val_data_path}} 2>/dev/null || python3 -c \"p='{{val_data_path}}'; b=open(p,'rb').read(); open(p,'wb').write(b[:len(b)//2])\"", "expected": "worse"},
+      "gaming_risks": ["the training script pointed at a different, smaller val file while this one is untouched (the judge must check the val path constant in the diff)", "val examples filtered inside the loader by length or loss"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [4, 3],
+    "algorithmic": [2, 4],
+    "allocation": [1, 6],
+    "caching": [1, 6],
+    "concurrency": [2, 5],
+    "dependency": [1, 7],
+    "test-add": [1, 5],
+    "bugfix": [2, 4],
+    "refactor-enabling": [1, 5],
+    "data": [3, 3],
+    "model": [3, 3],
+    "numerics": [2, 4],
+    "docs": [1, 9]
+  },
+  "noise_sources": ["seed: on a five-minute run the seed alone moves val loss by more than most real changes; three confirm seeds is the minimum", "dataloader order and worker count (pin num_workers, set SB_SEED into the sampler)", "GPU clocks and thermal state; another process on the same device", "nondeterministic kernels (set CUBLAS_WORKSPACE_CONFIG and use_deterministic_algorithms where the model allows)", "wall-clock budgets on a shared machine: a busy host means fewer steps, not a worse model; the tokens_per_s diagnostic separates the two", "first-run compilation (torch.compile, XLA) counted inside the budget"],
+  "hygiene_guardrails": ["determinism_gap", "train_loss", "eval_bytes"],
+  "notes": "This pack encodes the autoresearch shape with the three additions from docs/07 §7.4: a confirm-only held-out test split, a determinism check, and a noise floor from repeated seeds. The training script must honor SB_TIME_BUDGET_S (wall-clock, 0 means unlimited), SB_MAX_STEPS (step cap, used for the determinism card), SB_SEED, and print METRIC val_bpb=, METRIC train_loss=, METRIC tokens_per_s=, METRIC peak_mem_mb= at the end; if it does not, run an instrument campaign first. Rename val_bpb to val_loss or val_acc (direction maximize) to match the project's headline; keep the id consistent across cards. {{budget_s}} is the project's own budget (300 in autoresearch); {{screen_budget_s}} is a shorter budget for screening (about 40% of full) whose sigma is measured separately. The expected_duration_s entries written as expressions are evaluated by the metrologist into numbers before the card is stored; they are tight on purpose: a run that finishes in a tenth of its budget is the Gomoku case. test_bpb, train_loss, tokens_per_s and peak_mem_mb each cost a training run; if the budget is tight keep val_bpb, test_bpb, determinism_gap and eval_bytes. Every card here is contention_safe=false except eval_bytes: one training run at a time on the measurement device. The confirm run for test_bpb must evaluate the checkpoint produced by the confirm training run in the same clean checkout; the harness copies .strictlybetter/holdout/test_split/ in only for that step. hygiene_guardrails lists the three cheap ones so a campaign that picks val_bpb as its only goal still gets them."
+}

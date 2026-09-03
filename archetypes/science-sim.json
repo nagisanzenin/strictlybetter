@@ -1,0 +1,202 @@
+{
+  "id": "science-sim",
+  "title": "Scientific simulation or numerical method with a reference solution",
+  "match": {
+    "any_files": ["run.py", "simulate.py", "solve.py", "main.f90", "main.jl", "Project.toml", "CMakeLists.txt", "paper.tex", "reference/results.csv", "reference/expected.json"],
+    "any_dirs": ["reference", "references", "cases", "benchmarks", "validation", "verification", "notebooks", "figures"],
+    "languages": ["python", "julia", "fortran", "c", "cpp", "rust"],
+    "any_deps": ["numpy", "scipy", "jax", "fenics", "dolfin", "petsc4py", "mpi4py", "numba", "DifferentialEquations", "sundials", "eigen", "nalgebra"]
+  },
+  "confidence_notes": "The headline output is a number a paper reports: an error against an analytic or published solution, a convergence time, iterations to tolerance, a fit quality. Signals: a reference or validation directory with expected results, a cases/ or configs/ directory of named problem setups, a paper or figures directory, numerical dependencies, a solver loop with a tolerance. Distinguish from ml-training by the absence of a learned model and the presence of a reference solution; from data-pipeline by the output being a scalar quality, not a dataset. Per docs/07 §7.4: the reference case is a guardrail from the start, the holdout is a slice of the parameter space the experimenter never sees, and every hypothesis must state a mechanism.",
+  "commands": {
+    "build": "{{build_command}}",
+    "test": "python3 -m pytest -q tests",
+    "lint": "ruff check .",
+    "bench": "python3 {{run_script}} --case {{dev_case}}",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "secrets/", "reference/", "references/", "validation/", "verification/", "cases/", "configs/cases/", "data/reference*", "requirements*.txt", "environment.yml", "Project.toml", "Manifest.toml"],
+  "frozen_paths_hint": ["reference/", "references/", "validation/", "verification/", "cases/", "tests/", "scripts/compare.py", "scripts/evaluate.py"],
+  "default_cards": [
+    {
+      "id": "ref_error",
+      "title": "Error vs reference solution on {{dev_case}} (L2 or the project's own norm)",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "{{error_unit}}",
+      "measure": {
+        "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:ref_error",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"OMP_NUM_THREADS": "{{threads}}", "PYTHONHASHSEED": "0", "SB_SEED": "0"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 --resolution {{screen_resolution}} 2>&1 | grep -E '^METRIC '", "expected_duration_s": [1, 900]},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 5, "command": "python3 {{run_script}} --case {holdout} --seed 0 2>&1 | grep -E '^METRIC '", "holdout": {"kind": "arg", "values": ["{{holdout_case_1}}", "{{holdout_case_2}}", "{{holdout_case_3}}"]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["reference/", "cases/", "scripts/compare.py"]},
+      "degradation": {"apply": "perl -0pi -e 's/(tol(?:erance)?\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 100/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["the solver detects the dev case (by name, by grid size, by a parameter value) and applies a case-specific correction or reads the reference (the holdout cases exist for this)", "error computed on a subset of the domain, a coarser sampling, or after smoothing", "the comparison norm changed in a non-frozen helper (compare.py is frozen; a diff that reimplements the norm inline is the workaround)", "a fitted or tabulated answer replacing the computation (the lookup-in-place-of-the-algorithm case); wall_to_convergence_s collapsing to near zero is the tell", "resolution changed under the hood while the resolution guardrail reads the CLI argument, not the actual grid"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "wall_to_convergence_s",
+      "title": "Wall-clock to reach tolerance on {{dev_case}}",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "s",
+      "measure": {
+        "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:wall_to_convergence_s",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"OMP_NUM_THREADS": "{{threads}}", "PYTHONHASHSEED": "0", "SB_SEED": "0"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 --resolution {{screen_resolution}} 2>&1 | grep -E '^METRIC '", "expected_duration_s": [1, 900]},
+        "full": {"repeats": 2},
+        "confirm": {"repeats": 3, "max_repeats": 6, "command": "python3 {{run_script}} --case {holdout} --seed 0 2>&1 | grep -E '^METRIC '", "holdout": {"kind": "arg", "values": ["{{holdout_case_1}}", "{{holdout_case_2}}", "{{holdout_case_3}}"]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["reference/", "cases/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(def {{step_function}}\\([^)]*\\)[^:]*:\\n)/$1    import time as _sb_t; _sb_t.sleep(0.002)\\n/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["the convergence criterion loosened so the loop exits earlier (ref_error and conservation must hold; iters_to_tol drops with it)", "the timer started after setup or stopped before the final residual check", "a warm start from a cached solution of the dev case", "threads raised via the environment outside a declared config hypothesis"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "iters_to_tol",
+      "title": "Iterations to tolerance on {{dev_case}}",
+      "kind": "diagnostic",
+      "direction": "minimize",
+      "unit": "iterations",
+      "measure": {
+        "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:iters_to_tol",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"OMP_NUM_THREADS": "{{threads}}", "PYTHONHASHSEED": "0", "SB_SEED": "0"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2, "command": "python3 {{run_script}} --case {holdout} --seed 0 2>&1 | grep -E '^METRIC '", "holdout": {"kind": "arg", "values": ["{{holdout_case_1}}", "{{holdout_case_2}}", "{{holdout_case_3}}"]}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["reference/", "cases/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(tol(?:erance)?\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 0.01/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["an iteration counter that counts outer iterations only after an inner loop was added", "fewer iterations each doing more work (wall_to_convergence_s is the honest version; this card is a diagnostic for that reason)"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "conservation_violation",
+      "title": "Max relative drift of the conserved quantity ({{conserved_quantity}})",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "relative",
+      "measure": {
+        "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:conservation_violation",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"OMP_NUM_THREADS": "{{threads}}", "PYTHONHASHSEED": "0", "SB_SEED": "0"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2, "command": "python3 {{run_script}} --case {holdout} --seed 0 2>&1 | grep -E '^METRIC '", "holdout": {"kind": "arg", "values": ["{{holdout_case_1}}", "{{holdout_case_2}}", "{{holdout_case_3}}"]}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["reference/", "cases/", "scripts/compare.py"]},
+      "degradation": {"apply": "perl -0pi -e 's/(dt\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 10/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["the conserved quantity renormalized each step so the drift reads zero while the physics is wrong (a diff touching the diagnostic computation, not just the solver, is the tell)", "drift measured over fewer steps or only at the end"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "seed_gap",
+      "title": "|ref_error(seed 0) - ref_error(seed 1)| on {{dev_case}}",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "{{error_unit}}",
+      "measure": {
+        "command": "a=$(python3 {{run_script}} --case {{dev_case}} --seed 0 --resolution {{screen_resolution}} 2>/dev/null | sed -n 's/^METRIC ref_error=//p'); b=$(python3 {{run_script}} --case {{dev_case}} --seed 1 --resolution {{screen_resolution}} 2>/dev/null | sed -n 's/^METRIC ref_error=//p'); [ -n \"$a\" ] && [ -n \"$b\" ] || exit 1; python3 -c \"print('METRIC seed_gap=%.6g' % abs(float('$a') - float('$b')))\"",
+        "parse": "metric-line:seed_gap",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"OMP_NUM_THREADS": "{{threads}}", "PYTHONHASHSEED": "0"},
+        "expected_duration_s": [2, 1800]
+      },
+      "fidelity": {"screen": {"skip": true}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 2}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.5},
+      "integrity": {"frozen_paths": ["reference/", "cases/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(np\\.random\\.(?:default_rng|seed)\\([^)]*\\))/$1; import numpy as _sb_np; _sb_np.random.seed()/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["the seed argument ignored so both runs are identical and the gap is trivially zero (a diff that drops the seed plumbing is the tell)", "a method that is only stable for seed 0"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "ref_case_failed",
+      "title": "Reproduces the published reference case within its stated tolerance",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bool",
+      "measure": {
+        "command": "python3 scripts/compare.py --case {{reference_case}} --expected reference/{{reference_case}}.json --tolerance {{reference_tolerance}} >/dev/null 2>&1; rc=$?; [ $rc -le 1 ] || exit $rc; echo \"METRIC ref_case_failed=$rc\"",
+        "parse": "metric-line:ref_case_failed",
+        "cwd": ".",
+        "timeout_s": 3600,
+        "env": {"OMP_NUM_THREADS": "{{threads}}", "PYTHONHASHSEED": "0", "SB_SEED": "0"},
+        "expected_duration_s": [2, 3600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["reference/", "scripts/compare.py"]},
+      "degradation": {"apply": "perl -0pi -e 's/(tol(?:erance)?\\s*=\\s*)([0-9.eE+-]+)/${1}$2 * 1000/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["the comparison script bypassed by a wrapper that always exits 0 (compare.py is frozen; check the diff does not add a shim in its import path)", "the reference case's parameters changed in a non-frozen config"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "resolution_cells",
+      "title": "Grid cells or degrees of freedom actually used on {{dev_case}}",
+      "kind": "guardrail",
+      "direction": "equal",
+      "unit": "count",
+      "measure": {
+        "command": "python3 {{run_script}} --case {{dev_case}} --seed 0 --dry-run 2>&1 | grep -E '^METRIC '",
+        "parse": "metric-line:resolution_cells",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"OMP_NUM_THREADS": "{{threads}}"},
+        "expected_duration_s": [0.5, 300]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["cases/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(n(?:x|_cells|_points)\\s*=\\s*)(\\d+)/${1}int($2 \\/ 2)/' {{solver_file}}", "expected": "worse"},
+      "gaming_risks": ["the reported count taken from the CLI argument while the solver coarsens internally (the METRIC line must be printed from the assembled mesh, not the config)", "adaptive refinement disabled so the count is constant but accuracy falls (ref_error catches it only if the reference is fine enough)"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 4],
+    "algorithmic": [3, 3],
+    "allocation": [2, 4],
+    "caching": [1, 5],
+    "concurrency": [2, 4],
+    "dependency": [1, 7],
+    "test-add": [1, 5],
+    "bugfix": [2, 4],
+    "refactor-enabling": [1, 5],
+    "data": [1, 8],
+    "model": [1, 8],
+    "numerics": [4, 2],
+    "docs": [1, 9]
+  },
+  "noise_sources": ["floating-point summation order under threading (pin OMP_NUM_THREADS; bitwise reproducibility may need a single thread)", "thread count and NUMA placement for wall-clock", "BLAS backend and its threading (OPENBLAS_NUM_THREADS, MKL_NUM_THREADS should match OMP_NUM_THREADS)", "random initial conditions or stochastic terms (the seed_gap card measures this directly)", "JIT warm-up (numba, Julia) on the first call inside a timed region"],
+  "hygiene_guardrails": ["ref_case_failed", "conservation_violation", "resolution_cells"],
+  "notes": "The run script must accept --case, --seed, optionally --resolution and --dry-run, and print METRIC ref_error=, METRIC wall_to_convergence_s=, METRIC iters_to_tol=, METRIC conservation_violation=, METRIC resolution_cells= (the last from the assembled mesh, and under --dry-run without solving). scripts/compare.py exits 0 when the reference case matches within tolerance and 1 when it does not, and is frozen. Pick {{dev_case}} as one representative case and three {{holdout_case_*}} from the same family with different parameters (a different Reynolds number, a different mesh, a different forcing); the experimenter never sees the holdout names. A gain on the dev case that vanishes on holdout is a case-specific hack. Pre-registration is stricter here: the hypothesis must carry a mechanism, and the distiller copies confirmed mechanisms into inheritance.md section 8. numerics starts warm because precision, solver and tolerance changes are where science codes actually improve, and they are also where conservation breaks; the conservation and reference guardrails are the pair that keeps them honest. wall_to_convergence_s and ref_error each run the case; if the case is expensive, make ref_error the goal and read wall time from the same run by adding a second card with the same command only if the harness caches identical commands (it does not today)."
+}

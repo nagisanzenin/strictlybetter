@@ -1,0 +1,68 @@
+# strictlybetter profile: {{repo_name}}
+
+Written by `sb-orienteer` at {{generated_at}} from commit `{{head_commit}}` on branch `{{default_branch}}`. Section order is fixed; the harness parses sections by heading number. Regenerate with `sb orient --refresh`; edit section 10 by hand only.
+
+## 1. Purpose
+
+{{purpose}}
+
+## 2. Archetypes
+
+| Archetype | Confidence | Evidence |
+|---|---|---|
+{{archetype_rows}}
+
+Primary: `{{primary_archetype}}`. Packs stacked: {{stacked_packs}}.
+
+## 3. Verified commands
+
+Each command was executed once from a clean checkout. A command that failed is listed with its exit code; a command the project does not have is listed as `none`.
+
+| Command | Invocation | Verified | Exit | Duration (s) | Note |
+|---|---|---|---|---|---|
+| build | `{{build_command}}` | {{build_verified}} | {{build_exit}} | {{build_duration_s}} | {{build_note}} |
+| test | `{{test_command}}` | {{test_verified}} | {{test_exit}} | {{test_duration_s}} | {{test_note}} |
+| lint | `{{lint_command}}` | {{lint_verified}} | {{lint_exit}} | {{lint_duration_s}} | {{lint_note}} |
+| typecheck | `{{typecheck_command}}` | {{typecheck_verified}} | {{typecheck_exit}} | {{typecheck_duration_s}} | {{typecheck_note}} |
+| bench | `{{bench_command}}` | {{bench_verified}} | {{bench_exit}} | {{bench_duration_s}} | {{bench_note}} |
+| run | `{{run_command}}` | {{run_verified}} | {{run_exit}} | {{run_duration_s}} | {{run_note}} |
+
+## 4. Constraints
+
+Toolchain versions, required services, data files, minimum hardware. One bullet each, with whether it is satisfied on this machine.
+
+{{constraints}}
+
+## 5. Existing instruments
+
+Found before inventing anything (docs/02 §2.6, trust order 1): CI jobs that print a number, Makefile or justfile targets, bench suites, eval scripts, notebooks with a headline table.
+
+{{existing_instruments}}
+
+## 6. Protected paths (proposed)
+
+The loop may never write these (docs/09 §9.2). Archetype defaults plus what the orienteer found: CI, secrets, lockfiles, generated code, licenses, deployment config.
+
+{{protected_paths}}
+
+## 7. Frozen paths (proposed)
+
+The instrument (docs/04 §4.3): tests, benches, fixtures, eval scripts, reference outputs, snapshots. Hashed at campaign start; any diff touching them halts the campaign.
+
+{{frozen_paths}}
+
+## 8. Layout and entry points
+
+{{entry_points}}
+
+## 9. Notes for the metrologist
+
+Anything that will change which cards are honest here: a bench that needs a warm cache, a test that needs a service, a metric the README claims, an open issue labelled performance, a flag that silently changes measurement.
+
+{{notes}}
+
+## 10. Human notes
+
+Kept verbatim across refreshes. Constraints the owner adds by hand: what not to touch, what "better" means to them, what the next campaign should be.
+
+{{human_notes}}
