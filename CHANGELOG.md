@@ -2,6 +2,17 @@
 
 ## 1.2.0 — 2026-09-03 · the acceptance rule becomes a test
 
+### External-adversary gate
+- New `bench/run_adversary.py` (two phases; the real LLM judge sits between them). A blind red-team
+  agent wrote 8 attacks against pyfix (timer debt, stdout rewrite, stdlib shadow, env-tamper +
+  checksum forgery, repeat memo, env-sniff oracle, lazy proxies, background thread), all of which
+  cut the raw metric by 30× to 30,000× with checksum and tests green. Result
+  (`bench/results/20260903-170034-adversary-pyfix.md`): 0/8 accepted; validity caught 3 at screen,
+  the blind judge caught 5 and named the mechanism each time. Honest correction recorded in
+  docs/13 §13.6: for four of those five the paired confirmation would not have caught them, so the
+  judge is load-bearing for deferred/memoised-work attacks; the earlier claim that the other walls
+  catch everything without the judge held only for the six scripted tricks.
+
 Gates run for this release: <selftest N/N · unittest N · mutation N/N red · review K/K reports · fuzz 0/500 · numbers audit N numbers · gaming suite T/T caught, W/W walls load-bearing · live test · dogfood · user session verdict>
 Benchmark: see bench/results/<file>
 

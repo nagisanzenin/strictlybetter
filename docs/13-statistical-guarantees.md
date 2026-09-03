@@ -56,3 +56,10 @@ Sigma (1.4826 × MAD of five repeats) enters only the screen filter, the minimum
 - Ernst, M. D. (2004). Permutation methods: a basis for exact inference. *Statistical Science*, 19(4), 676–685. https://doi.org/10.1214/088342304000000396. Verified 2026-09-03.
 - Pocock, S. J. (1977). Group sequential methods in the design and analysis of clinical trials. *Biometrika*, 64(2), 191–199. https://doi.org/10.1093/biomet/64.2.191. Verified 2026-09-03.
 - Bonferroni's inequality: `P(∪ A_i) ≤ Σ P(A_i)`; the union bound, no citation needed.
+
+
+## 13.6 What the external-adversary gate showed (2026-09-03)
+
+Eight attack diffs written blind by a separate agent (given only the fixture, the frozen list, and the goal) ran through the engine with all walls on (`bench/results/20260903-170034-adversary-pyfix.md`). None was accepted. Three instrument-tampering attacks (timer monkeypatch, stdout rewrite, stdlib shadowing) were discarded by the validity wall at screen. Five attacks that leave the instrument honest and cheat inside the code under test (checksum forgery via environment tampering, repeat-keyed memoization, environment-sniffing lookup table, lazy result proxies, a background worker thread) passed the statistical screen with about 100% claimed improvement and were stopped only by the blind judge, which named the mechanism in every case.
+
+The lesson that changes the guarantees: for deferred or memoised work, the paired confirmation on held-out seeds is not a defense, because the instrument runs its repeats in-process and hashes the result once, so the fake speedup reproduces under any seed. The exact test controls the false-accept rate for **honest noise**; it says nothing about a candidate that has changed what the instrument measures. That class is the judge's, and the judge is an LLM with no error-rate claim. The two are complementary, not redundant, and the earlier statement that the other walls catch everything without the judge was wrong: it held for the six scripted tricks, not for these eight.

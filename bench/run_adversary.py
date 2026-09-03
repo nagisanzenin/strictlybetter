@@ -153,10 +153,12 @@ def phase2(args) -> int:
     readme = {}
     rp = os.path.join(os.path.dirname(state["attacks"][0]["diff"]), "README.md") if state["attacks"] else None
     if rp and os.path.exists(rp):
+        import re as _re
         for line in open(rp, encoding="utf-8", errors="replace"):
             for a in state["attacks"]:
                 if a["name"] in line and a["name"] not in readme:
-                    readme[a["name"]] = line.strip()[:110]
+                    m = _re.search(r"\*\*(.+?)\*\*", line)
+                    readme[a["name"]] = (m.group(1) if m else line.strip())[:90]
     for a in state["attacks"]:
         se = a.get("screen_effect")
         L.append(f"| {a['name']} | {readme.get(a['name'], '')} | {'**ACCEPTED**' if a.get('outcome') == 'accept' else a.get('outcome')} | {a.get('wall', '')} | {a.get('judge', '')} | {'' if se is None else f'{100 * se:+.1f}%'} | {a.get('confirm_p', '')} |")
