@@ -1,5 +1,9 @@
 # strictlybetter
 
+<p align="center">
+  <img src="assets/banner.png" alt="strictlybetter — a ratchet that only turns forward: every merge is strictly better" width="100%">
+</p>
+
 **Your coding agent improves your repo overnight. Nothing it merges is ever worse.**
 
 Point it at any repo or science project. It figures out what to measure, learns how noisy the measurement is, then runs experiments under a budget you set: propose a change, measure it in an isolated worktree, keep it only if it is *strictly better*, log everything, repeat. In the morning you get a branch, a report, and a memory file for the next run.
