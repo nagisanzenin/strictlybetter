@@ -97,5 +97,5 @@ The loop stops, in order of precedence:
 ## 6.8 What the loop does not do
 
 - It does not run many parallel campaigns on the same metric set; contention on measurement destroys the noise floor.
-- It does not chase a goal below its noise floor by increasing repeats without bound; if `κσ` cannot be beaten in a plateau, the instrument is the problem, and the distiller says so.
+- It does not chase a goal below its noise floor by increasing repeats without bound; if `κσ` cannot be beaten in a plateau, the instrument is the problem, and the distiller says so. The minimum-detectable-effect gate at `campaign start` applies the same rule before the first experiment (`04-anti-overfitting.md` §4.2).
 - It does not accept an experimenter's claim that a change "should" help. Only confirmation numbers move the baseline.

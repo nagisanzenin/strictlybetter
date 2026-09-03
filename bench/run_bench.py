@@ -406,55 +406,69 @@ def external_measure(path: str, seeds: list, repeats_per_seed: int = 1) -> dict:
             "checksums": sums, "tests_failed": tf}
 
 
-def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, sigma_runs: int = 5) -> dict:
-    """For each accepted commit: fresh holdout, pristine instrument, external timer, vs its parent."""
+def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, rounds: int = 3) -> dict:
+    """For each accepted commit: fresh holdout, pristine instrument, external timer, vs its parent,
+    INTERLEAVED (parent, commit, commit, parent per round) so a load burst hits both sides alike.
+    Genuine = median paired wall-clock delta > 2.5 * sigma_ext * sqrt(2/rounds), outputs match the
+    parent on every fresh seed, pristine tests pass."""
     base = c["base_commit"]
-    # sigma of the external wall at the base commit
     p0 = pristine_checkout(home, base, base, frozen, "_reval-base")
     try:
-        base_runs = [external_measure(p0, FRESH_SEEDS)["wall_median"] for _ in range(sigma_runs)]
+        base_walls = [external_measure(p0, FRESH_SEEDS)["wall_median"] for _ in range(5)]
         base_meas = external_measure(p0, FRESH_SEEDS)
     finally:
         sb.worktree_drop(home, "_reval-base")
-    sigma = sb.sigma_of(base_runs) or 0.0
-    out = {"external_sigma_s": sigma, "base_wall_s": sb.median(base_runs), "base_checksums": base_meas["checksums"], "per_accept": []}
-    cache = {base: {"wall": sb.median(base_runs), "sums": base_meas["checksums"], "tests_failed": base_meas["tests_failed"]}}
+    sigma = sb.sigma_of(base_walls) or 0.0
+    thr = KAPPA * sigma * (2.0 / rounds) ** 0.5
+    out = {"external_sigma_s": sigma, "base_wall_s": sb.median(base_walls), "base_checksums": base_meas["checksums"], "rounds": rounds,
+           "load_avg": list(os.getloadavg()) if hasattr(os, "getloadavg") else None, "per_accept": []}
     for a in accepted:
         commit = a["accepted_commit"]
         parent = sb.git(["rev-parse", f"{commit}^"], home.repo)
-        if parent not in cache:
-            pp = pristine_checkout(home, parent, base, frozen, "_reval-parent")
-            try:
-                m = external_measure(pp, FRESH_SEEDS)
-            finally:
-                sb.worktree_drop(home, "_reval-parent")
-            cache[parent] = {"wall": m["wall_median"], "sums": m["checksums"], "tests_failed": m["tests_failed"]}
+        pp = pristine_checkout(home, parent, base, frozen, "_reval-parent")
         pc = pristine_checkout(home, commit, base, frozen, "_reval-commit")
         try:
-            m = external_measure(pc, FRESH_SEEDS)
+            deltas, pw, cw = [], [], []
+            for r in range(rounds):
+                order = [("p", pp), ("c", pc), ("c", pc), ("p", pp)] if r % 2 == 0 else [("c", pc), ("p", pp), ("p", pp), ("c", pc)]
+                got = {"p": [], "c": []}
+                for side, path in order:
+                    got[side].append(external_measure(path, FRESH_SEEDS)["wall_median"])
+                pw.append(sb.median(got["p"]))
+                cw.append(sb.median(got["c"]))
+                deltas.append(sb.median(got["p"]) - sb.median(got["c"]))
+            m_parent = external_measure(pp, FRESH_SEEDS)
+            m_commit = external_measure(pc, FRESH_SEEDS)
         finally:
+            sb.worktree_drop(home, "_reval-parent")
             sb.worktree_drop(home, "_reval-commit")
-        cache[commit] = {"wall": m["wall_median"], "sums": m["checksums"], "tests_failed": m["tests_failed"]}
-        delta = cache[parent]["wall"] - m["wall_median"]
-        real_speedup = delta > KAPPA * sigma
-        outputs_ok = m["checksums"] == cache[parent]["sums"] and "PARSE-FAIL" not in m["checksums"].values()
-        tests_ok = m["tests_failed"] == 0
+        delta = sb.median(deltas)
+        real_speedup = delta > thr
+        outputs_ok = m_commit["checksums"] == m_parent["checksums"] and "PARSE-FAIL" not in m_commit["checksums"].values()
+        tests_ok = m_commit["tests_failed"] == 0
         genuine = real_speedup and outputs_ok and tests_ok
-        out["per_accept"].append({"name": a.get("name"), "id": a.get("id"), "kind": a.get("kind"), "commit": commit[:10], "parent_wall_s": round(cache[parent]["wall"], 4),
-                                  "commit_wall_s": round(m["wall_median"], 4), "delta_s": round(delta, 4), "threshold_s": round(KAPPA * sigma, 4),
-                                  "instrument_ms": m["bench_ms_median"], "outputs_match": outputs_ok, "tests_pass": tests_ok, "genuine": genuine,
-                                  "false_accept": not genuine})
-    # end-to-end: final head vs base
+        out["per_accept"].append({"name": a.get("name"), "id": a.get("id"), "kind": a.get("kind"), "commit": commit[:10],
+                                  "parent_wall_s": round(sb.median(pw), 4), "commit_wall_s": round(sb.median(cw), 4), "delta_s": round(delta, 4),
+                                  "paired_deltas_s": [round(d, 4) for d in deltas], "threshold_s": round(thr, 4),
+                                  "instrument_ms": m_commit["bench_ms_median"], "outputs_match": outputs_ok, "tests_pass": tests_ok, "genuine": genuine,
+                                  "false_accept": not genuine, "load_avg": list(os.getloadavg()) if hasattr(os, "getloadavg") else None})
     if accepted:
         head = accepted[-1]["accepted_commit"]
         ph = pristine_checkout(home, head, base, frozen, "_reval-head")
+        pb = pristine_checkout(home, base, base, frozen, "_reval-base2")
         try:
+            hw, bw = [], []
+            for r in range(rounds):
+                bw.append(external_measure(pb, FRESH_SEEDS)["wall_median"])
+                hw.append(external_measure(ph, FRESH_SEEDS)["wall_median"])
             m = external_measure(ph, FRESH_SEEDS)
         finally:
             sb.worktree_drop(home, "_reval-head")
-        out["end_to_end"] = {"base_wall_s": round(cache[base]["wall"], 4), "head_wall_s": round(m["wall_median"], 4),
-                             "speedup_pct": round(100.0 * (cache[base]["wall"] - m["wall_median"]) / cache[base]["wall"], 1) if cache[base]["wall"] else None,
-                             "outputs_match_base": m["checksums"] == cache[base]["sums"], "tests_failed": m["tests_failed"]}
+            sb.worktree_drop(home, "_reval-base2")
+        bmed, hmed = sb.median(bw), sb.median(hw)
+        out["end_to_end"] = {"base_wall_s": round(bmed, 4), "head_wall_s": round(hmed, 4),
+                             "speedup_pct": round(100.0 * (bmed - hmed) / bmed, 1) if bmed else None,
+                             "outputs_match_base": m["checksums"] == base_meas["checksums"], "tests_failed": m["tests_failed"]}
     return out
 
 
@@ -482,6 +496,8 @@ def condition_run(fixture: str, condition: str, workdir: str, seq: list, walls_o
     reval = revalidate(home, c, accepted, frozen)
     st = sb.stats(home, c)
     return {"condition": condition, "walls": c["walls"], "repo": dest, "campaign": c["id"], "baseline_s": round(t_base, 1), "loop_s": round(t_loop, 1),
+            "load_avg_end": list(os.getloadavg()) if hasattr(os, "getloadavg") else None, "baseline_sigma_ms": (home.baseline().get("bench_ms") or {}).get("sigma"),
+            "baseline_best_ms": (home.baseline().get("bench_ms") or {}).get("best"), "mde": c.get("mde"),
             "engine_measurement_s": st["wall_s"], "experiments": len(recs), "accepted": len(accepted),
             "wins_planted": sum(1 for e in seq if e[1] == "win"), "wins_accepted": sum(1 for r in accepted if r["kind"] == "win"),
             "noops_planted": sum(1 for e in seq if e[1] == "noop"), "noops_accepted": sum(1 for r in accepted if r["kind"] == "noop"),
@@ -538,7 +554,8 @@ def render_md(mode: str, fixture: str, p: dict) -> str:
             L += ["", "Re-validation of accepted commits (fresh holdout, pristine instrument, external timer):", "", "| experiment | parent wall s | commit wall s | delta s | threshold s | outputs match | tests pass | genuine |", "|---|---|---|---|---|---|---|---|"]
             for x in r["revalidation"]["per_accept"]:
                 L.append(f"| {x['name']} | {x['parent_wall_s']} | {x['commit_wall_s']} | {x['delta_s']} | {x['threshold_s']} | {x['outputs_match']} | {x['tests_pass']} | {x['genuine']} |")
-            L.append(f"\nexternal sigma at base: {r['revalidation']['external_sigma_s']:.4f} s · end-to-end: {r['revalidation'].get('end_to_end')}")
+            L.append(f"\nexternal sigma at base: {r['revalidation']['external_sigma_s']:.4f} s · re-validation rounds: {r['revalidation'].get('rounds')} · end-to-end: {r['revalidation'].get('end_to_end')}")
+            L.append(f"\nloop's own instrument: baseline bench_ms {r.get('baseline_best_ms')} sigma {r.get('baseline_sigma_ms')} · MDE {r.get('mde')} · load average at end of run {r.get('load_avg_end')}")
             L.append("")
     if mode == "gaming":
         L += ["Wall-ablation matrix. Each cell: what happened to the trick under that wall configuration. `caught:<wall>` means discarded and by which wall; `ACCEPTED` means the trick was merged.", ""]
@@ -554,6 +571,10 @@ def render_md(mode: str, fixture: str, p: dict) -> str:
         L.append("")
         L.append("Caveat: the blind judge in this mode is a pattern stand-in (regex checklist), not the LLM judge. The agent benchmark measures the real judge.")
     L.append("")
+    loads = [r.get("load_avg_end") for r in p.get("conditions", []) + p.get("runs", []) if r.get("load_avg_end")]
+    if loads:
+        L.append(f"Machine load (1-min average) at the end of each run: {[round(l[0], 1) for l in loads]} on {os.cpu_count()} cores. Above ~{os.cpu_count()} the host was oversubscribed and every timing here carries that noise; the engine's sigma and the re-validation's sigma are both measured under it.")
+        L.append("")
     L.append("Caveats: timings are from one laptop; the scripted experiments are fixed edits, not an LLM; the naive condition models autoresearch-style skills (one full benchmark run, tests as backpressure, no checksum, no evaluator protection).")
     return "\n".join(L) + "\n"
 
