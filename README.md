@@ -25,7 +25,7 @@ Point it at any repo or science project. It figures out what to measure, learns 
       │   can paste as the PR description, and main exactly as you left it
 ```
 
-`selftest 86/86` · one stdlib Python file, zero network · Claude Code, Codex, OpenCode, Hermes, Antigravity, OpenClaw, Pi, DeepSeek Harness, ZCode
+`selftest 88/88` · one stdlib Python file, zero network · Claude Code, Codex, OpenCode, Hermes, Antigravity, OpenClaw, Pi, DeepSeek Harness, ZCode
 
 ---
 
@@ -235,7 +235,7 @@ Everything the skills do goes through one engine you can also run directly:
 
 ```bash
 python3 scripts/sb.py status        # or: next · report · budget · ledger view <id> · doctor
-python3 scripts/sb.py selftest      # 86 checks, including two full campaigns on temp repos (walls, multi-repo, services)
+python3 scripts/sb.py selftest      # 88 checks, including two full campaigns on temp repos (walls, multi-repo, services)
 ```
 
 `python3 scripts/sb.py --help` is the full command reference.
