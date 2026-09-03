@@ -112,25 +112,42 @@ def now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def read_json(path: str, default=None):
+def read_json(path: str, default=None, expect: type | None = None):
+    """Read a state file. Missing -> default (when given). Corrupt, undecodable, a directory, or the
+    wrong top-level type -> SBError, never a traceback: read paths degrade, they do not brick."""
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except FileNotFoundError:
         if default is not None:
             return default
-        raise
-    except json.JSONDecodeError as e:
-        raise SBError(f"corrupt JSON in {path}: {e}")
+        raise SBError(f"missing state file {path}")
+    except (json.JSONDecodeError, UnicodeDecodeError, IsADirectoryError, PermissionError, OSError) as e:
+        raise SBError(f"corrupt state file {path}: {type(e).__name__}: {str(e)[:120]}")
+    if expect is not None and not isinstance(data, expect):
+        raise SBError(f"corrupt state file {path}: expected {expect.__name__}, found {type(data).__name__}")
+    return data
+
+
+def num(x, default: float = 0.0) -> float:
+    """Coerce a stored number; corrupt values count as the default instead of crashing a report."""
+    try:
+        v = float(x)
+        return default if v != v else v  # NaN -> default
+    except (TypeError, ValueError):
+        return default
 
 
 def write_json_atomic(path: str, data) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.tmp.{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = f"{path}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError) as e:
+        raise SBError(f"cannot write {path}: {type(e).__name__}: {str(e)[:120]}")
 
 
 def append_jsonl(path: str, record: dict) -> None:
@@ -341,7 +358,10 @@ class Home:
 
     def ensure(self) -> None:
         for d in ["metrics", "wt", "archive", "holdout", "inbox", "tmp", "cache", "reports"]:
-            os.makedirs(self.p(d), exist_ok=True)
+            try:
+                os.makedirs(self.p(d), exist_ok=True)
+            except OSError as e:
+                raise SBError(f"state home {self.p(d)} is not a directory: {e}")
         gi = self.p(".gitignore")
         if not os.path.exists(gi):
             with open(gi, "w") as f:
@@ -375,47 +395,73 @@ class Home:
 
     def load_card(self, mid: str) -> dict:
         path = self.card_path(mid)
-        if not os.path.exists(path):
+        if not os.path.isfile(path):
             raise SBError(f"no metric card '{mid}' (expected {path})")
-        card = read_json(path)
+        card = read_json(path, expect=dict)
         validate_card(card)
         return card
 
     def list_cards(self) -> list:
         if not os.path.isdir(self.metrics_dir):
             return []
-        return sorted(f[:-5] for f in os.listdir(self.metrics_dir) if f.endswith(".json"))
+        return sorted(f[:-5] for f in os.listdir(self.metrics_dir) if f.endswith(".json") and os.path.isfile(os.path.join(self.metrics_dir, f)))
 
     def save_card(self, card: dict) -> None:
         write_json_atomic(self.card_path(card["id"]), card)
 
     # campaign / baseline / ratchet / bandit / profile
     def campaign(self) -> dict | None:
-        return read_json(self.campaign_path, default={}) or None
+        c = read_json(self.campaign_path, default={}, expect=dict)
+        if not c:
+            return None
+        for k in ("goals", "guardrails", "diagnostics", "accepted_ids"):
+            if not isinstance(c.get(k, []), list):
+                raise SBError(f"corrupt campaign.json: {k} is not a list")
+        for k in ("walls", "spent", "budget", "holdout_override", "card_hashes", "external_hashes", "mde"):
+            if c.get(k) is not None and not isinstance(c.get(k), dict):
+                raise SBError(f"corrupt campaign.json: {k} is not an object")
+        if not isinstance(c.get("id"), str):
+            raise SBError("corrupt campaign.json: id is not a string")
+        return c
 
     def save_campaign(self, c: dict) -> None:
         write_json_atomic(self.campaign_path, c)
 
     def baseline(self) -> dict:
-        return read_json(self.baseline_path, default={})
+        b = read_json(self.baseline_path, default={}, expect=dict)
+        return {k: v for k, v in b.items() if isinstance(v, dict) and isinstance(v.get("levels", {}), dict)}
 
     def save_baseline(self, b: dict) -> None:
         write_json_atomic(self.baseline_path, b)
 
     def ratchet(self) -> dict:
-        return read_json(self.ratchet_path, default={})
+        r = read_json(self.ratchet_path, default={}, expect=dict)
+        return {k: v for k, v in r.items() if isinstance(v, dict)}
 
     def save_ratchet(self, r: dict) -> None:
         write_json_atomic(self.ratchet_path, r)
 
     def bandit(self) -> dict:
-        return read_json(self.bandit_path, default={})
+        b = read_json(self.bandit_path, default={}, expect=dict)
+        ops = b.get("operators")
+        if not isinstance(ops, dict):
+            b["operators"] = {}
+        else:
+            b["operators"] = {k: v for k, v in ops.items() if isinstance(v, dict)}
+        return b
 
     def save_bandit(self, b: dict) -> None:
         write_json_atomic(self.bandit_path, b)
 
     def profile(self) -> dict:
-        return read_json(self.profile_path, default={})
+        p = read_json(self.profile_path, default={}, expect=dict)
+        if p.get("commands") is not None and not isinstance(p.get("commands"), dict):
+            p["commands"] = {}
+        if p.get("protected_paths") is not None and not isinstance(p.get("protected_paths"), list):
+            p["protected_paths"] = []
+        p["protected_paths"] = [x for x in (p.get("protected_paths") or []) if isinstance(x, str)]
+        p["commands"] = {k: v for k, v in (p.get("commands") or {}).items() if isinstance(v, (str, type(None)))}
+        return p
 
     # ledger
     def ledger_add(self, eid: str, event: str, data: dict) -> None:
@@ -429,8 +475,10 @@ class Home:
         """Merge ledger events into one record per experiment id (event-sourced)."""
         recs: dict = {}
         for e in read_jsonl(self.ledger_path):
+            if not isinstance(e, dict):
+                continue
             eid = e.get("id")
-            if not eid or not isinstance(e.get("data"), dict):
+            if not isinstance(eid, str) or not eid or not isinstance(e.get("data"), dict):
                 continue
             r = recs.setdefault(eid, {"id": eid, "events": []})
             r["events"].append(e.get("event"))
@@ -463,7 +511,7 @@ class Home:
             elif ev == "cost":
                 c = r.setdefault("cost", {"tokens_in": 0, "tokens_out": 0, "wall_s": 0.0, "dollars": 0.0})
                 for k in ["tokens_in", "tokens_out", "wall_s", "dollars"]:
-                    c[k] = c.get(k, 0) + (d.get(k) or 0)
+                    c[k] = num(c.get(k, 0)) + num(d.get(k))
                 if d.get("tier"):
                     c["tier"] = d["tier"]
             elif ev == "retry":
@@ -489,16 +537,16 @@ def validate_card(card: dict) -> None:
     for k in ["id", "kind", "direction", "measure"]:
         if k not in card:
             raise SBError(f"card missing '{k}'")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(card["id"])):
+    if not isinstance(card["id"], str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", card["id"]):
         raise SBError(f"bad card id {card['id']!r}")
     if card["kind"] not in ("goal", "guardrail", "diagnostic"):
         raise SBError("card.kind must be goal|guardrail|diagnostic")
     if card["direction"] not in ("maximize", "minimize", "equal"):
         raise SBError("card.direction must be maximize|minimize|equal")
     m = card["measure"]
-    if not isinstance(m, dict) or not m.get("command") or not m.get("parse"):
-        raise SBError("card.measure needs command and parse")
-    if not str(m["parse"]).startswith(("metric-line:", "regex:", "json:")):
+    if not isinstance(m, dict) or not isinstance(m.get("command"), str) or not isinstance(m.get("parse"), str):
+        raise SBError("card.measure needs string command and parse")
+    if not m["parse"].startswith(("metric-line:", "regex:", "json:")):
         raise SBError("card.measure.parse must start with metric-line:, regex:, or json:")
     fid = card.get("fidelity") or {}
     if not isinstance(fid, dict):
@@ -508,9 +556,18 @@ def validate_card(card: dict) -> None:
             raise SBError(f"unknown fidelity level {lvl}")
         if not isinstance(spec, dict):
             raise SBError(f"fidelity.{lvl} must be an object")
+    if not isinstance(card.get("gaming_risks", []) or [], list):
+        raise SBError("gaming_risks must be a list")
     for w in card.get("gaming_risks", []) or []:
         if not isinstance(w, str):
             raise SBError("gaming_risks must be strings")
+    for k in ("integrity", "acceptance", "degradation", "services", "noise", "probe"):
+        if card.get(k) is not None and not isinstance(card.get(k), dict):
+            raise SBError(f"card.{k} must be an object")
+    for k in ("frozen_paths", "external_paths"):
+        v = (card.get("integrity") or {}).get(k)
+        if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            raise SBError(f"card.integrity.{k} must be a list of strings")
 
 
 def fidelity_spec(card: dict, level: str) -> dict:
@@ -1077,15 +1134,15 @@ def halt(home: Home, c: dict, reason: str) -> None:
 
 
 def budget_left(c: dict) -> dict:
-    b = c.get("budget") or {}
-    s = c.get("spent") or {}
+    b = c.get("budget") if isinstance(c.get("budget"), dict) else {}
+    s = c.get("spent") if isinstance(c.get("spent"), dict) else {}
     left = {}
     if b.get("experiments") is not None:
-        left["experiments"] = int(b["experiments"]) - int(s.get("experiments", 0))
+        left["experiments"] = int(num(b["experiments"])) - int(num(s.get("experiments", 0)))
     if b.get("hours") is not None:
-        left["hours"] = float(b["hours"]) - float(s.get("wall_s", 0)) / 3600.0
+        left["hours"] = num(b["hours"]) - num(s.get("wall_s", 0)) / 3600.0
     if b.get("dollars") is not None:
-        left["dollars"] = float(b["dollars"]) - float(s.get("dollars", 0))
+        left["dollars"] = num(b["dollars"]) - num(s.get("dollars", 0))
     return left
 
 
@@ -1093,15 +1150,18 @@ def budget_exhausted(c: dict) -> str | None:
     for k, v in budget_left(c).items():
         if v <= 0:
             return k
-    if int((c.get("spent") or {}).get("experiments", 0)) >= int(c.get("iteration_cap", DEFAULT_ITERATION_CAP)):
+    s = c.get("spent") if isinstance(c.get("spent"), dict) else {}
+    if int(num(s.get("experiments", 0))) >= int(num(c.get("iteration_cap", DEFAULT_ITERATION_CAP), DEFAULT_ITERATION_CAP)):
         return "iteration_cap"
     return None
 
 
 def add_spend(c: dict, **kw) -> None:
-    s = c.setdefault("spent", {"experiments": 0, "wall_s": 0.0, "dollars": 0.0, "tokens_in": 0, "tokens_out": 0})
+    if not isinstance(c.get("spent"), dict):
+        c["spent"] = {"experiments": 0, "wall_s": 0.0, "dollars": 0.0, "tokens_in": 0, "tokens_out": 0}
+    s = c["spent"]
     for k, v in kw.items():
-        s[k] = s.get(k, 0) + v
+        s[k] = num(s.get(k, 0)) + num(v)
 
 
 def card_set(home: Home, c: dict) -> dict:
@@ -1688,6 +1748,24 @@ def cmd_measure(home: Home, args) -> int:
     return 0
 
 
+def timer_divergence(card: dict, base: dict | None, meas: dict, comp: dict) -> str | None:
+    """A time-unit goal whose instrument claims a large speedup while the process wall-clock the
+    harness observed barely moved is a lying timer, not a win. Returns the invalidity note or None."""
+    if not (comp.get("valid") and base and card.get("direction") == "minimize"
+            and str(card.get("unit", "")).lower() in TIME_UNITS and comp.get("improved")):
+        return None
+    try:
+        instr_ratio = float(meas["median"]) / float(base["median"]) if float(base["median"]) > 0 else None
+        wall_new = float(meas.get("secs_total", 0)) / max(1, int(meas.get("n", 1)))
+        wall_base = float(base.get("secs_per_run") or 0)
+        wall_ratio = (wall_new / wall_base) if wall_base > 0 else None
+    except (TypeError, ValueError):
+        return None
+    if instr_ratio is not None and wall_ratio is not None and instr_ratio < WALL_DIVERGENCE_INSTR and wall_ratio > WALL_DIVERGENCE_WALL:
+        return f"instrument claims {instr_ratio:.2f}x of baseline but process wall-clock is {wall_ratio:.2f}x (timer or instrument tampering?)"
+    return None
+
+
 def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict, bases: dict | None = None) -> tuple:
     cards = card_set(home, c)
     b = home.baseline()
@@ -1707,20 +1785,12 @@ def comparisons_for(home: Home, c: dict, r: dict, level: str, results: dict, bas
         tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA))
         ke_card = kappa_eff(kap, int(r.get("diff_lines") or 0), len(r.get("new_deps") or [])) if c.get("walls", {}).get("noise_floor", True) else 0.0
         comp = compare_metric(card, base, meas, ke_card, tol, c.get("walls", {}))
-        if c.get("walls", {}).get("validity", True) and comp.get("valid") and base and card.get("direction") == "minimize" \
-                and str(card.get("unit", "")).lower() in TIME_UNITS and comp.get("improved"):
-            # ratio of what the instrument claims vs what the harness observed
-            try:
-                instr_ratio = float(meas["median"]) / float(base["median"]) if float(base["median"]) > 0 else None
-                wall_new = float(meas.get("secs_total", 0)) / max(1, int(meas.get("n", 1)))
-                wall_base = float(base.get("secs_per_run") or 0)
-                wall_ratio = (wall_new / wall_base) if wall_base > 0 else None
-            except (TypeError, ValueError):
-                instr_ratio = wall_ratio = None
-            if instr_ratio is not None and wall_ratio is not None and instr_ratio < WALL_DIVERGENCE_INSTR and wall_ratio > WALL_DIVERGENCE_WALL:
+        if c.get("walls", {}).get("validity", True):
+            note = timer_divergence(card, base, meas, comp)
+            if note:
                 comp["valid"] = False
                 comp["improved"] = False
-                comp["note"] = f"instrument claims {instr_ratio:.2f}x of baseline but process wall-clock is {wall_ratio:.2f}x (timer or instrument tampering?)"
+                comp["note"] = note
         comps.append(comp)
     c["_kappa_eff"] = ke
     return comps, ke
@@ -2136,17 +2206,18 @@ def stats(home: Home, c: dict) -> dict:
         reasons[key] = reasons.get(key, 0) + 1
     by_op: dict = {}
     for r in recs:
-        o = by_op.setdefault(r.get("operator") or "?", {"attempts": 0, "accepts": 0})
+        o = by_op.setdefault(str(r.get("operator") or "?"), {"attempts": 0, "accepts": 0})
         o["attempts"] += 1
         if r.get("verdict") == "accept":
             o["accepts"] += 1
-    wall = float((c.get("spent") or {}).get("wall_s", 0.0))
-    dollars = float((c.get("spent") or {}).get("dollars", 0.0))
-    fpb = c.get("false_promotion_budget") or {"window": FP_WINDOW, "max_fraction": FP_MAX_FRACTION}
-    recent_prom = [r for r in promoted if r.get("verdict") in ("accept", "discard")][-int(fpb.get("window", FP_WINDOW)):]
+    spent = c.get("spent") if isinstance(c.get("spent"), dict) else {}
+    wall = num(spent.get("wall_s", 0.0))
+    dollars = num(spent.get("dollars", 0.0))
+    fpb = c.get("false_promotion_budget") if isinstance(c.get("false_promotion_budget"), dict) else {"window": FP_WINDOW, "max_fraction": FP_MAX_FRACTION}
+    recent_prom = [r for r in promoted if r.get("verdict") in ("accept", "discard")][-max(1, int(num(fpb.get("window", FP_WINDOW), FP_WINDOW))):]
     fp_rate = (len([r for r in recent_prom if r.get("verdict") == "discard"]) / len(recent_prom)) if recent_prom else 0.0
-    gaps = [g for g in c.get("holdout_gaps", []) if g is not None]
-    effects = [e for e in c.get("confirmed_effects", []) if e is not None]
+    gaps = [num(g) for g in (c.get("holdout_gaps") if isinstance(c.get("holdout_gaps"), list) else []) if isinstance(g, (int, float))]
+    effects = [num(e) for e in (c.get("confirmed_effects") if isinstance(c.get("confirmed_effects"), list) else []) if isinstance(e, (int, float))]
     return {
         "campaign": c["id"], "status": c.get("status"), "experiments": n, "promoted": len(promoted), "accepted": len(accepted),
         "discarded": len(discarded), "discard_reasons": reasons, "false_promotions": len(fp), "false_promotion_rate_window": round(fp_rate, 3),
@@ -2154,7 +2225,7 @@ def stats(home: Home, c: dict) -> dict:
         "wall_s_per_accept": round(wall / len(accepted), 1) if accepted else None, "dollars_per_accept": round(dollars / len(accepted), 4) if accepted else None,
         "confirmed_effects": effects, "mean_confirmed_effect": (sum(effects) / len(effects)) if effects else None,
         "holdout_gap_mean_last5": (sum(gaps[-5:]) / len(gaps[-5:])) if gaps else None,
-        "since_last_accept": c.get("since_last_accept", 0), "exploration_level": c.get("exploration_level", 0),
+        "since_last_accept": int(num(c.get("since_last_accept", 0))), "exploration_level": int(num(c.get("exploration_level", 0))),
         "budget_left": budget_left(c), "budget_exhausted": budget_exhausted(c),
     }
 
@@ -2175,15 +2246,15 @@ def cmd_distill_stats(home: Home, args) -> int:
         if c.get("status") == "running":
             halt(home, c, f"budget:{s['budget_exhausted']}")
             c = home.campaign()
-    elif c.get("exploration_level", 0) >= EXPLORATION_MAX and c.get("since_last_accept", 0) >= int(c.get("plateau_patience", PATIENCE)):
+    elif int(num(c.get("exploration_level", 0))) >= EXPLORATION_MAX and int(num(c.get("since_last_accept", 0))) >= int(num(c.get("plateau_patience", PATIENCE), PATIENCE)):
         decision = "stop:converged"
         if c.get("status") == "running":
             c["status"] = "ended"
             c["ended_at"] = now_iso()
             c["end_reason"] = "converged"
             home.ledger_add("campaign", "end", {"reason": "converged"})
-    elif c.get("exploration_level", 0) > 0:
-        decision = f"explore:level{c['exploration_level']}"
+    elif int(num(c.get("exploration_level", 0))) > 0:
+        decision = f"explore:level{int(num(c['exploration_level']))}"
     s["decision"] = decision
     c["last_distill"] = {"at": now_iso(), "experiments": s["experiments"], "decision": decision}
     home.save_campaign(c)
@@ -2211,30 +2282,36 @@ def cmd_next(home: Home, args) -> int:
             archive.append(f)
     # batch size from budget and screen cost
     screen_s = 0.0
-    for mid in c["goals"] + c["guardrails"]:
+    for mid in [m for m in c["goals"] + c["guardrails"] if isinstance(m, str)]:
         lv = (b.get(mid) or {}).get("levels", {}).get("screen") or {}
-        screen_s += float(lv.get("secs_per_run") or 0.0)
+        screen_s += num((lv if isinstance(lv, dict) else {}).get("secs_per_run") or 0.0)
     left = budget_left(c)
-    batch = int(c.get("max_parallel", 2))
+    batch = int(num(c.get("max_parallel", 2), 2))
     if left.get("hours") is not None and screen_s > 0:
         batch = int(max(1, min(6, (left["hours"] * 3600.0) / (screen_s * 8.0))))
     if left.get("experiments") is not None:
         batch = max(0, min(batch, int(left["experiments"])))
-    lvl = int(c.get("exploration_level", 0))
+    lvl = int(num(c.get("exploration_level", 0)))
     size_allow = ["tiny", "small"] if lvl == 0 else (["tiny", "small", "medium"] if lvl == 1 else ["tiny", "small", "medium", "large"])
     mix = bandit_mix(home, max(1, batch), seed=args.seed, priors=c.get("archetype_priors") or None)
-    frontier = {mid: {"best": (b.get(mid) or {}).get("best"), "sigma": (b.get(mid) or {}).get("sigma"), "kind": ("goal" if mid in c["goals"] else "guardrail" if mid in c["guardrails"] else "diagnostic"),
-                      "direction": home.load_card(mid)["direction"]} for mid in c["goals"] + c["guardrails"] + c["diagnostics"]}
+    frontier = {}
+    for mid in [m for m in c["goals"] + c["guardrails"] + c["diagnostics"] if isinstance(m, str)]:
+        try:
+            direction = home.load_card(mid)["direction"]
+        except SBError:
+            direction = "?"
+        frontier[mid] = {"best": (b.get(mid) or {}).get("best"), "sigma": (b.get(mid) or {}).get("sigma"),
+                         "kind": ("goal" if mid in c["goals"] else "guardrail" if mid in c["guardrails"] else "diagnostic"), "direction": direction}
     brief = {"campaign": c["id"], "status": c.get("status"), "halt_reason": c.get("halt_reason"), "head_commit": c.get("head_commit"), "branch": c.get("branch"),
-             "budget_left": left, "experiments_run": s["experiments"], "accepted": s["accepted"], "since_last_accept": c.get("since_last_accept", 0),
+             "budget_left": left, "experiments_run": s["experiments"], "accepted": s["accepted"], "since_last_accept": int(num(c.get("since_last_accept", 0))),
              "exploration_level": lvl, "allowed_diff_sizes": size_allow, "batch_size": batch, "operator_mix": mix, "frontier": frontier,
              "goals": c["goals"], "guardrails": c["guardrails"], "diagnostics": c["diagnostics"], "frozen_paths": c.get("frozen_paths_effective"),
              "protected_paths": protected_paths(home, c), "open_experiments": open_ids, "recent_dead_ends": dead, "accepted_so_far": wins,
-             "archive_hints": archive, "inheritance": home.p("inheritance.md") if os.path.exists(home.p("inheritance.md")) else None,
+             "archive_hints": archive, "inheritance": home.p("inheritance.md") if os.path.isfile(home.p("inheritance.md")) else None,
              "stop_requested": stop_requested(home), "screen_untrusted": bool(c.get("screen_untrusted")), "decision_hint": s.get("decision") if "decision" in s else None,
-             "max_parallel": int(c.get("max_parallel", 2)), "distill_every": int(c.get("distill_every", 8)), "iteration_cap": int(c.get("iteration_cap", DEFAULT_ITERATION_CAP)),
-             "scope_paths": c.get("scope_paths") or [], "external_instruments": c.get("external_instruments_effective") or [],
-             "walls": c.get("walls"), "mde": c.get("mde")}
+             "max_parallel": int(num(c.get("max_parallel", 2), 2)), "distill_every": int(num(c.get("distill_every", 8), 8)), "iteration_cap": int(num(c.get("iteration_cap", DEFAULT_ITERATION_CAP), DEFAULT_ITERATION_CAP)),
+             "scope_paths": c.get("scope_paths") if isinstance(c.get("scope_paths"), list) else [], "external_instruments": c.get("external_instruments_effective") if isinstance(c.get("external_instruments_effective"), list) else [],
+             "walls": c.get("walls") if isinstance(c.get("walls"), dict) else {}, "mde": c.get("mde") if isinstance(c.get("mde"), dict) else {}}
     if args.json:
         print(json.dumps(brief, indent=2))
         return 0
@@ -2329,10 +2406,13 @@ def write_report(home: Home, c: dict) -> str:
         if r.get("verdict") == "discard":
             lines.append(f"- `{r['id']}` [{r.get('operator')}] {r.get('target')}: {r.get('reason')} · {(r.get('hypothesis') or '')[:100]}")
     lines += ["", "## Reproduce", "", f"    git checkout {c.get('branch')}", "    sb measure --fidelity confirm  (per accepted experiment id, see ledger)", ""]
-    os.makedirs(home.p("reports"), exist_ok=True)
     out = "\n".join(lines) + "\n"
-    with open(home.p("reports", f"{c['id']}.md"), "w", encoding="utf-8") as f:
-        f.write(out)
+    try:
+        os.makedirs(home.p("reports"), exist_ok=True)
+        with open(home.p("reports", f"{c['id']}.md"), "w", encoding="utf-8") as f:
+            f.write(out)
+    except OSError as e:
+        raise SBError(f"cannot write report: {e}")
     return out
 
 
@@ -2504,7 +2584,10 @@ def cmd_inheritance(home: Home, args) -> int:
         return 0
     if args.action == "show":
         p = home.p("inheritance.md")
-        print(open(p).read() if os.path.exists(p) else "")
+        try:
+            print(open(p, encoding="utf-8", errors="replace").read() if os.path.isfile(p) else "")
+        except OSError as e:
+            raise SBError(f"cannot read {p}: {e}")
         return 0
     raise SBError("inheritance: write|show")
 
@@ -2625,6 +2708,12 @@ def selftest() -> int:
     d = decide({}, camp, [compare_metric(goal, base, {"valid": False, "invalid": ["timeout"]}, 2.5, 1.0, walls)], "screen")
     check("decide invalid", d["verdict"] == "discard" and d["reason"] == "invalid")
     check("gap ratio", gap_ratio(0.10, 0.05) == 0.5 and gap_ratio(None, 0.1) is None)
+    tcard = {"id": "t", "kind": "goal", "direction": "minimize", "unit": "ms"}
+    tbase = {"median": 100.0, "sigma": 1.0, "n": 5, "secs_per_run": 2.0}
+    tmeas = {"valid": True, "median": 10.0, "secs_total": 6.0, "n": 3}   # claims 10x faster, wall-clock unchanged
+    tcomp = compare_metric(tcard, tbase, tmeas, 2.5, 1.0, walls)
+    check("timer divergence flags a lying instrument", timer_divergence(tcard, tbase, tmeas, tcomp) is not None)
+    check("timer divergence passes a real speedup", timer_divergence(tcard, tbase, {"valid": True, "median": 10.0, "secs_total": 0.6, "n": 3}, tcomp) is None)
     # end-to-end on a temp git repo with a fake metric
     with tempfile.TemporaryDirectory() as td:
         repo = os.path.join(td, "repo")
@@ -2636,7 +2725,8 @@ def selftest() -> int:
             f.write("N = 40\n")
         with open(os.path.join(repo, "bench.py"), "w") as f:
             f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\n"
-                    "print('METRIC score=%d' % (work.N + r.randint(0, 1)))\nprint('METRIC checks=%s' % ('ok' if work.N > 0 else 'bad'))\n")
+                    "print('METRIC score=%d' % (work.N + r.randint(0, 1)))\nprint('METRIC checks=%s' % ('ok' if work.N > 0 else 'bad'))\n"
+                    "print('METRIC seed=%s' % os.environ.get('SB_SEED', '0'))\n")
         os.makedirs(os.path.join(repo, "tests"))
         with open(os.path.join(repo, "tests", "t.py"), "w") as f:
             f.write("print('METRIC tests_failed=0')\n")
@@ -2652,7 +2742,9 @@ def selftest() -> int:
                   "integrity": {"frozen_paths": ["tests/"]}, "gaming_risks": [], "contention_safe": True, "acceptance": {"tolerance_sigma": 0}}
         card_q = {"id": "checks", "kind": "guardrail", "direction": "equal", "measure": {"command": "python3 bench.py", "parse": "metric-line:checks", "timeout_s": 60},
                   "gaming_risks": [], "contention_safe": True}
-        for cd in (card_g, card_h, card_q):
+        card_s = {"id": "seed", "kind": "diagnostic", "direction": "maximize", "measure": {"command": "python3 bench.py", "parse": "metric-line:seed", "timeout_s": 60},
+                  "fidelity": {"confirm": {"repeats": 3, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}}, "gaming_risks": [], "contention_safe": True, "reuse_output": True}
+        for cd in (card_g, card_h, card_q, card_s):
             validate_card(cd)
             home.save_card(cd)
         # probe: degradation must make score worse
@@ -2660,7 +2752,7 @@ def selftest() -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             rc = cmd_card_probe(home, ns)
         check("monotonicity probe passes", rc == 0)
-        spec = {"id": "t1", "goals": ["score"], "guardrails": ["tests_failed", "checks"], "budget": {"experiments": 6}, "plateau_patience": 2}
+        spec = {"id": "t1", "goals": ["score"], "guardrails": ["tests_failed", "checks"], "diagnostics": ["seed"], "budget": {"experiments": 6}, "plateau_patience": 2}
         sp = os.path.join(td, "c.json")
         write_json_atomic(sp, spec)
         ns = argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=False, allow_ratchet_regression=False)
@@ -2671,6 +2763,40 @@ def selftest() -> int:
         b = home.baseline()
         check("baseline measured score", b.get("score", {}).get("best") is not None and b["score"].get("sigma") is not None)
         check("eval hash set", bool(c.get("eval_hash")))
+        # budget is charged before any work: a prereg that fails at worktree creation still counts
+        c_before = home.campaign()
+        spent_before = int(c_before["spent"]["experiments"])
+        c_before["head_commit"] = "0" * 40
+        home.save_campaign(c_before)
+        hp = os.path.join(td, "h.json")
+        write_json_atomic(hp, {"operator": "config", "target": "work.py", "hypothesis": "x", "predicted": {"score": "-1%"}})
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_prereg(home, argparse.Namespace(file=hp))
+        except SBError:
+            pass
+        c_after = home.campaign()
+        check("budget charged before worktree creation", int(c_after["spent"]["experiments"]) == spent_before + 1)
+        c_after["head_commit"] = c_before_head = git(["rev-parse", "HEAD"], repo)
+        c_after["next_id"] = 1
+        c_after["spent"]["experiments"] = spent_before
+        home.save_campaign(c_after)
+        # a goal without a measured sigma cannot start a campaign
+        home2 = Home(repo=repo, home=os.path.join(td, "home2"))
+        home2.ensure()
+        card_ns = dict(card_g)
+        card_ns["id"] = "score1"
+        card_ns["fidelity"] = {"screen": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}}
+        home2.save_card(card_ns)
+        sp2 = os.path.join(td, "c2.json")
+        write_json_atomic(sp2, {"id": "t2", "goals": ["score1"], "budget": {"experiments": 2}})
+        halted_ns = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_campaign(home2, argparse.Namespace(action="start", file=sp2, no_baseline=False, repeats=1, allow_unusable=True, allow_ratchet_regression=False))
+        except SBError:
+            halted_ns = (home2.campaign() or {}).get("status") == "halted"
+        check("goal without measured sigma halts at start", halted_ns)
         # experiment 1: real improvement (N 40 -> 20)
         hp = os.path.join(td, "h.json")
         write_json_atomic(hp, {"operator": "algorithmic", "target": "work.py", "hypothesis": "halve N", "predicted": {"score": "-50%"}})
@@ -2727,6 +2853,7 @@ def selftest() -> int:
         r = home.experiments()[e1]
         check("confirm accepts real improvement", r["confirm"]["verdict"] == "accept")
         check("confirm is paired against fresh head", r["confirm"].get("paired") is True and (r["confirm"].get("head_results") or {}).get("score", {}).get("median") in (40.0, 41.0))
+        check("confirm used the holdout seeds", sorted((r["confirm"].get("results") or {}).get("seed", {}).get("values") or []) == [7.0, 8.0, 9.0])
         check("paired baseline is fresh head median", any(comp["id"] == "score" and comp["baseline"] in (40.0, 41.0) for comp in r["confirm"]["comparisons"]))
         # re-submitting a different (tampered) commit after confirmation must not be acceptable
         wt1 = os.path.join(home.wt_dir, e1)
@@ -2863,6 +2990,7 @@ def selftest() -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_report(home, argparse.Namespace())
         check("report written", os.path.exists(home.p("reports", "t1.md")))
+        check("report labels dollars as estimated", "estimated" in open(home.p("reports", "t1.md")).read())
         for name in list(os.listdir(home.wt_dir)):
             worktree_drop(home, name)
     # --- multi-repo, monorepo scope, and services on a second temp repo
@@ -3037,6 +3165,11 @@ def main(argv=None) -> int:
         return 1
     except KeyboardInterrupt:
         return 130
+    except Exception as e:  # a corrupt state file must degrade to an error line, never a traceback
+        if os.environ.get("SB_DEBUG"):
+            raise
+        sys.stderr.write(f"sb: internal error in '{args.cmd}': {type(e).__name__}: {str(e)[:200]} (state may be corrupt; run `sb doctor`; SB_DEBUG=1 for the traceback)\n")
+        return 3
 
 
 if __name__ == "__main__":
