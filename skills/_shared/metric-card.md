@@ -104,3 +104,15 @@ A run is **invalid**, and never compared, when: the command times out; it exits 
 4. `direction: equal` guardrails (checksums, snapshots) are the cheapest regression wall a project can have. Add one whenever the bench can hash its outputs.
 5. A timing metric gets `contention_safe: false` and `screen.repeats ≥ 1`; a count gets `contention_safe: true` and `tolerance_sigma: 0`.
 6. Fill archetype placeholders (`{{package}}`, `{{package_dir}}`, `{{bench_path}}`, `{{bench_test}}`, `{{hot_module}}`, `{{hot_function}}`) from the profile's `template_vars`; drop a card whose tool is not installed rather than shipping a command that exits 3.
+
+
+## Fields added in 1.1.2
+
+| Field | Required | Meaning |
+|---|---|---|
+| `targets` | goals: yes | Repo-relative paths whose change would move the metric (the code under test, not the instrument). `campaign start` halts a goal whose targets are all frozen or protected (issue #3). |
+| `control` | no | `true` keeps a goal whose targets are all frozen as a deliberate negative control instead of halting. |
+| `measure.warmup` / `fidelity.<level>.warmup` | no | Unmeasured warm-up runs before the recorded ones. Default 1 for time-unit metrics (`unit` in ms/s/us/ns/min), 0 otherwise (issue #4). |
+| screen `repeats` for time-unit metrics | no | Defaults to 2 (median) when the screen level does not set `repeats` (issue #4). |
+
+Cost: `sb cost <id> --wall-s S --tier T` with no tokens records `dollars: null` and the campaign's dollar figure reads `n/a (tokens not reported)`; set `SB_EST_TOKENS='{"low":[in,out],"medium":[in,out],"high":[in,out]}'` in the environment for an order-of-magnitude estimate, labelled `token_source: env-estimate` in the ledger (issue #6).

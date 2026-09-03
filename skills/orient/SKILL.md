@@ -29,7 +29,7 @@ SB_ROOT="${SB_PY%/scripts/sb.py}"
 SB_REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 sb() { python3 "$SB_PY" --repo "$SB_REPO" "$@"; }   # a FUNCTION, not a string: zsh does not
 SB=sb                                                 # word-split "$SB"; both shells run `sb`
-$SB --version   # must print `sb 1.1.1`; anything else means this block did not run
+$SB --version | grep -q '^sb 1\.' || { echo "strictlybetter: engine did not answer (expected sb 1.x)" >&2; return 2 2>/dev/null || exit 2; }   # major version only; exact patch level is not asserted
 ```
 
 ## 0 · Re-anchor (never trust conversational memory)
@@ -48,6 +48,8 @@ ls "$SB_ROOT/archetypes/"                 # the packs the orienteer matches agai
 
 If a profile already exists (`"profile": true`) and the user did not ask for a refresh, show
 `$SB_REPO/.strictlybetter/profile.md` and stop.
+
+> If the Agent tool does not offer the `strictlybetter:sb-*` type, use the fallback spawn shape in `skills/_shared/subagents.md` (a general agent told to Read the agent file first).
 
 ## 2 · Spawn the orienteer (once)
 

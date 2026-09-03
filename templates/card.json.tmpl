@@ -3,6 +3,8 @@
   "id": "{{metric_id}}",
   "_comment_id": "snake_case, unique within the project; the ledger, baseline and campaign refer to it by this string.",
   "title": "{{human title, one line}}",
+  "targets": ["{{code path the metric measures, e.g. src/}}"],
+  "_comment_targets": "Goals: the code whose change would move this metric (never the instrument). campaign start halts a goal whose targets are all frozen; \"control\": true keeps it as a negative control.",
   "kind": "goal",
   "_comment_kind": "goal | guardrail | diagnostic. A goal must improve, a guardrail must hold, a diagnostic is recorded and never decides anything. A card without a measured noise.sigma cannot be a goal.",
   "direction": "minimize",

@@ -100,3 +100,13 @@ The engine requires `archetypes` (non-empty list), `commands` (object), and `pur
 ## Return
 
 `DONE <out>`
+
+
+## Worktree safety of existing instruments (issue #5)
+
+Every instrument you record under `existing_instruments` gets `"worktree_safe": true|false`: true
+only if every input path the command reads is tracked at HEAD (`git -C <repo> ls-files` lists it).
+Experiments run in engine-created worktrees that contain tracked files only, so an instrument that
+reads an untracked directory (`bench/runs/`, a local dataset, a results cache) cannot be a measure
+command there. Say which path is untracked in `"worktree_safe_reason"`. Do not guess: run
+`git ls-files -- <path>` for each input you saw the command open.

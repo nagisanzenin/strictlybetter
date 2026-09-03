@@ -83,3 +83,19 @@ timed; coverage-style ratios ship as `diagnostic` (the loop optimizes them by de
 ## Return
 
 `DONE <n> cards` (append ` greenfield` when no goal card could be written).
+
+
+## Instruments that are not worktree-safe (issue #5)
+
+Skip any `existing_instruments` entry with `"worktree_safe": false` as a measure command (its inputs
+are untracked and absent from experiment worktrees). Rebuild the metric on tracked inputs when they
+exist; otherwise record it as a `diagnostic` card whose `measure.command` is only valid in the main
+worktree and say so in `gaming_risks`. Never make a goal or guardrail of it.
+
+## `targets` (issue #3)
+
+Every goal card carries `"targets": [<repo-relative paths>]`: the code whose change would move the
+metric (the module under the benchmark, the hot package, the config the metric reads), NOT the
+instrument. `campaign start` halts a goal whose every target is frozen or protected, because no
+legal experiment could move it; `"control": true` on the card keeps such a metric on purpose as a
+negative control. Guardrails and diagnostics may carry `targets` too; the engine only checks goals.

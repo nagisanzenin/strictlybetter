@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.1.2 — 2026-09-03 · six issues from a second agent's ZCode run on redswarm-decoded
+
+Another agent ran the plugin on ZCode against `redswarm-decoded` the same day and filed issues #1–#6.
+All six are addressed here. Thanks to that run for the first non-Claude-Code signal.
+
+### Fixed
+- #1 Skills asserted an exact engine version string that drifts on every patch release; the
+  resolution block now checks the major version only (`sb 1.`) and fails closed otherwise.
+- #2 Platforms whose Agent tool does not expose `strictlybetter:sb-*` types (ZCode, generic
+  OpenCode agents): `skills/_shared/subagents.md` and every spawning skill now carry the fallback
+  spawn shape (a general agent told to Read the agent file first), and state that tier pinning
+  and the judge's Read-only tool list are not enforced there.
+- #3 A goal whose optimizable surface is entirely frozen was accepted silently as a goal. Cards now
+  carry `targets` (the code whose change would move the metric); `campaign start` halts
+  `goal-frozen:<metric>` when every target is frozen or protected unless the card sets
+  `"control": true`. Metrologist guidance updated; selftest check.
+- #4 Screen fidelity for timing metrics was one warm-cache run: a change that was −10% at confirm
+  screened at −30%. Time-unit cards now default to one unmeasured warm-up run at every level and
+  two recorded screen runs (median); cards can override with `warmup` and `repeats`. Selftest checks.
+- #5 Instruments that read untracked inputs cannot run in experiment worktrees. The orienteer now
+  tags each existing instrument `worktree_safe` (every input tracked at HEAD, checked with
+  `git ls-files`), and the metrologist skips unsafe ones as measure commands.
+- #6 `sb cost` with no tokens recorded `$0.0`, which reads as free. It now records `dollars: null`
+  with `token_source: unknown`; status and the report print `n/a (tokens not reported)` and count
+  such experiments. `SB_EST_TOKENS='{"low":[in,out],"medium":[...],"high":[...]}'` gives an
+  order-of-magnitude estimate labelled `env-estimate`.
+
+Gates run for this release: selftest 93/93; unittest 62 OK; bun 17/17. Mutation, fuzz, and the
+benchmark are unchanged from 1.1.0 except that timing screens now take two runs plus a warm-up
+(the bench's `naive` condition pins screen repeats to 1 and is unaffected; the `walls` condition
+will screen slower and is not re-run for this patch).
+
 ## 1.1.1 — 2026-09-03 · what the first live run caught
 
 The first end-to-end run of the front-door skill on a fresh pyfix copy, with the plugin installed

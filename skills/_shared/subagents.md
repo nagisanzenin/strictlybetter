@@ -14,6 +14,17 @@ On Claude Code these are registered agents: spawn `strictlybetter:sb-judge` (or 
 name if your platform strips the namespace) with the Agent tool. Every spawn is a fresh
 context. Never fork.
 
+**If your platform's Agent tool does not offer these types** (ZCode, OpenCode's generic agents, any
+host that only lists `general-purpose`-style agents): spawn a general agent and put this sentence
+BEFORE the task text, with the absolute path under the plugin root:
+
+> You are strictlybetter's `<name>`. First Read your full agent definition at `<plugin-root>/agents/<name>.md` and follow it exactly. Then:
+
+The agent files are self-contained for this. Two consequences on such platforms: the `effort:`
+frontmatter (tier pinning of the three experimenters) is silently dropped, so `sb cost --tier` is
+the orchestrator's self-report rather than an enforced tier; and the judge's Read-only tool list is
+advisory, so state in the task text that it must not run commands.
+
 ## Rules that do not bend
 
 - **Payloads go by file path, never inline.** Write the JSON under

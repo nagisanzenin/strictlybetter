@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 # ----------------------------------------------------------------------------
 # Constants (fixed before data; see docs/04 and docs/06). Do not tune to results.
@@ -577,6 +577,8 @@ def validate_card(card: dict) -> None:
         v = (card.get("integrity") or {}).get(k)
         if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
             raise SBError(f"card.integrity.{k} must be a list of strings")
+    if card.get("targets") is not None and not (isinstance(card["targets"], list) and all(isinstance(x, str) for x in card["targets"])):
+        raise SBError("card.targets must be a list of repo-relative paths (the code whose change moves this metric)")
 
 
 def fidelity_spec(card: dict, level: str) -> dict:
@@ -596,6 +598,13 @@ def fidelity_spec(card: dict, level: str) -> dict:
         "allow_nonzero_exit": bool(f.get("allow_nonzero_exit", m.get("allow_nonzero_exit", False))),
         "skip": bool(f.get("skip", False)),  # confirm-only metrics (held-out test split) skip screen/full
     }
+    timing = card.get("direction") != "equal" and str(card.get("unit", "")).lower() in TIME_UNITS
+    # Timing metrics: one unmeasured warm-up run per level (caches, JIT, disk) and at least two
+    # recorded screen runs, unless the card says otherwise. Issue #4: a warm-cache n=1 screen
+    # showed -30% on a change that was -10% at confirm.
+    spec["warmup"] = int(f.get("warmup", m.get("warmup", 1 if timing else 0)))
+    if timing and level == "screen" and "repeats" not in f:
+        spec["repeats"] = max(2, spec["repeats"])
     spec["max_repeats"] = max(spec["max_repeats"], spec["repeats"])
     band = spec.get("expected_duration_s")
     try:
@@ -667,6 +676,11 @@ def measure_paired(home: Home, card: dict, level: str, cand: str, head: str, rep
         _OUTPUT_CACHE.clear()
     runs_c, runs_h = [], []
     with measurement_lock(home, card):
+        for _ in range(spec.get("warmup", 0)):
+            for path in (head, cand):
+                with services_up(card.get("services"), path, f"card {card['id']} services") as (ok, _why):
+                    if ok:
+                        measure_once(card, level, path, holdout_value=(hvals[0] if hvals else None))  # discarded warm-up
         for i in range(repeats):
             hv = hvals[i % len(hvals)] if hvals else None
             order = [("h", head), ("c", cand)] if i % 2 == 0 else [("c", cand), ("h", head)]
@@ -822,6 +836,8 @@ def measure_card(home: Home, card: dict, level: str, checkout: str, repeats: int
         with services_up(card.get("services"), checkout, f"card {card['id']} services") as (ok, why):
             if not ok:
                 return invalid_summary(why, level)
+            for _ in range(spec.get("warmup", 0)):
+                measure_once(card, level, checkout, holdout_value=(hvals[0] if hvals else None), extra_env=extra_env)  # discarded warm-up
             for i in range(repeats):
                 hv = hvals[i % len(hvals)] if hvals else None
                 runs.append(measure_once(card, level, checkout, holdout_value=hv, extra_env=extra_env))
@@ -1572,6 +1588,18 @@ def campaign_start(home: Home, args) -> int:
             if home.load_card(m)["direction"] != "equal" and e.get("sigma") is None:
                 halt(home, home.campaign(), f"metric {m} has no measured sigma (need >=2 repeats)")
                 raise SBError(f"metric {m} has no measured sigma; campaign halted")
+        # a goal whose declared targets are all frozen is a control, not a goal (issue #3)
+        for m in goals:
+            card = home.load_card(m)
+            targets = [t for t in (card.get("targets") or []) if isinstance(t, str)]
+            if targets and not card.get("control"):
+                fp_eff = home.campaign().get("frozen_paths_effective") or []
+                pp_eff = protected_paths(home, home.campaign())
+                if all(matches_any(t, fp_eff) or matches_any(t, pp_eff) for t in targets):
+                    halt(home, home.campaign(), f"goal-frozen:{m}")
+                    raise SBError(f"goal {m}: every declared target ({', '.join(targets)}) is frozen or protected, so no legal experiment can "
+                                  f"move it. Unfreeze a target, demote the card to diagnostic, or set \"control\": true on the card to keep it as a "
+                                  f"negative control. Campaign halted.")
         # minimum detectable effect per goal: the instrument must be able to see a plausible win
         mdes = {}
         for m in goals:
@@ -2211,10 +2239,31 @@ def cmd_cost(home: Home, args) -> int:
     experiment_record(home, eid)
     pricing = c.get("pricing") or DEFAULT_PRICING
     tin, tout = int(args.tokens_in or 0), int(args.tokens_out or 0)
-    dollars = float(args.dollars) if args.dollars is not None else (tin * pricing["in_per_mtok"] + tout * pricing["out_per_mtok"]) / 1e6
-    data = {"tokens_in": tin, "tokens_out": tout, "wall_s": float(args.wall_s or 0.0), "dollars": dollars, "tier": args.tier, "estimated": args.dollars is None}
+    source = "reported"
+    if tin == 0 and tout == 0 and args.dollars is None and args.tier:
+        # The platform reported no tokens. SB_EST_TOKENS='{"low":[in,out],"medium":[..],"high":[..]}' gives an
+        # order-of-magnitude estimate per tier; without it the dollar figure is unknown, not zero (issue #6).
+        try:
+            est = json.loads(os.environ.get("SB_EST_TOKENS") or "{}").get(args.tier)
+        except (json.JSONDecodeError, AttributeError):
+            est = None
+        if isinstance(est, list) and len(est) == 2:
+            tin, tout = int(num(est[0])), int(num(est[1]))
+            source = "env-estimate"
+        else:
+            source = "unknown"
+    if args.dollars is not None:
+        dollars = float(args.dollars)
+    elif source == "unknown":
+        dollars = None
+    else:
+        dollars = (tin * pricing["in_per_mtok"] + tout * pricing["out_per_mtok"]) / 1e6
+    data = {"tokens_in": tin, "tokens_out": tout, "wall_s": float(args.wall_s or 0.0), "dollars": dollars, "tier": args.tier,
+            "estimated": args.dollars is None, "token_source": source}
     home.ledger_add(eid, "cost", data)
-    add_spend(c, wall_s=data["wall_s"], dollars=dollars, tokens_in=tin, tokens_out=tout)
+    add_spend(c, wall_s=data["wall_s"], dollars=(dollars or 0.0), tokens_in=tin, tokens_out=tout)
+    if source == "unknown":
+        c.setdefault("spent", {})["dollars_unknown"] = int(num(c.get("spent", {}).get("dollars_unknown", 0))) + 1
     home.save_campaign(c)
     print(json.dumps({"id": eid, **data}))
     return 0
@@ -2248,8 +2297,11 @@ def stats(home: Home, c: dict) -> dict:
     return {
         "campaign": c["id"], "status": c.get("status"), "experiments": n, "promoted": len(promoted), "accepted": len(accepted),
         "discarded": len(discarded), "discard_reasons": reasons, "false_promotions": len(fp), "false_promotion_rate_window": round(fp_rate, 3),
-        "screen_untrusted": bool(c.get("screen_untrusted")), "by_operator": by_op, "wall_s": round(wall, 1), "dollars_est": round(dollars, 4),
-        "wall_s_per_accept": round(wall / len(accepted), 1) if accepted else None, "dollars_per_accept": round(dollars / len(accepted), 4) if accepted else None,
+        "screen_untrusted": bool(c.get("screen_untrusted")), "by_operator": by_op, "wall_s": round(wall, 1),
+        "dollars_est": (round(dollars, 4) if not spent.get("dollars_unknown") else "n/a (tokens not reported)"),
+        "dollars_unknown_experiments": int(num(spent.get("dollars_unknown", 0))),
+        "wall_s_per_accept": round(wall / len(accepted), 1) if accepted else None,
+        "dollars_per_accept": ((round(dollars / len(accepted), 4) if not spent.get("dollars_unknown") else "n/a") if accepted else None),
         "confirmed_effects": effects, "mean_confirmed_effect": (sum(effects) / len(effects)) if effects else None,
         "holdout_gap_mean_last5": (sum(gaps[-5:]) / len(gaps[-5:])) if gaps else None,
         "since_last_accept": int(num(c.get("since_last_accept", 0))), "exploration_level": int(num(c.get("exploration_level", 0))),
@@ -2421,7 +2473,7 @@ def write_report(home: Home, c: dict) -> str:
             status = "held" if str(sv) == str(nv) else "CHANGED"
         lines.append(f"| {mid} | {card['direction']} | {sv} | {nv} | {status} |")
     lines += ["", "## Cost", "", f"- experiments: {s['experiments']} (promoted {s['promoted']}, accepted {s['accepted']}, discarded {s['discarded']})",
-              f"- discard reasons: {s['discard_reasons']}", f"- wall-clock charged (measurement plus experimenter time reported via `sb cost`): {s['wall_s']} s", f"- estimated dollars (from reported tokens): {s['dollars_est']}",
+              f"- discard reasons: {s['discard_reasons']}", f"- wall-clock charged (measurement plus experimenter time reported via `sb cost`): {s['wall_s']} s", f"- dollars: {s['dollars_est']} (estimated from reported tokens at the campaign's pricing table" + (f"; {s['dollars_unknown_experiments']} experiment(s) reported no tokens, so the total is unknown" if s.get('dollars_unknown_experiments') else "") + ")",
               f"- per accepted improvement: {s['wall_s_per_accept']} s, ${s['dollars_per_accept']}", f"- false promotions: {s['false_promotions']} (window rate {s['false_promotion_rate_window']})",
               f"- holdout gap (mean of last 5 accepted): {s['holdout_gap_mean_last5']}", f"- walls: {', '.join(k for k, v in c.get('walls', {}).items() if v) or 'none (naive)'}", "",
               "## Accepted changes", ""]
@@ -2738,6 +2790,10 @@ def selftest() -> int:
     d = decide({}, camp, [compare_metric(goal, base, {"valid": False, "invalid": ["timeout"]}, 2.5, 1.0, walls)], "screen")
     check("decide invalid", d["verdict"] == "discard" and d["reason"] == "invalid")
     check("gap ratio", gap_ratio(0.10, 0.05) == 0.5 and gap_ratio(None, 0.1) is None)
+    tcard_ms = {"id": "t", "kind": "goal", "direction": "minimize", "unit": "ms", "measure": {"command": "x", "parse": "metric-line:t"}}
+    tcard_ct = {"id": "c", "kind": "guardrail", "direction": "minimize", "unit": "count", "measure": {"command": "x", "parse": "metric-line:c"}}
+    check("timing metric screens with 2 repeats and 1 warm-up", fidelity_spec(tcard_ms, "screen")["repeats"] == 2 and fidelity_spec(tcard_ms, "screen")["warmup"] == 1)
+    check("count metric screens with 1 repeat and no warm-up", fidelity_spec(tcard_ct, "screen")["repeats"] == 1 and fidelity_spec(tcard_ct, "screen")["warmup"] == 0)
     tcard = {"id": "t", "kind": "goal", "direction": "minimize", "unit": "ms"}
     tbase = {"median": 100.0, "sigma": 1.0, "n": 5, "secs_per_run": 2.0}
     tbase = {"median": 400.0, "sigma": 1.0, "n": 5, "secs_per_run": 0.5}   # 400 ms measured inside a 0.5 s process
@@ -2832,6 +2888,22 @@ def selftest() -> int:
         except SBError:
             halted_ns = (home2.campaign() or {}).get("status") == "halted"
         check("goal without measured sigma halts at start", halted_ns)
+        # a goal whose targets are all frozen halts at start unless marked control (issue #3)
+        home3 = Home(repo=repo, home=os.path.join(td, "home3"))
+        home3.ensure()
+        card_ctl = dict(card_g)
+        card_ctl["id"] = "score_ctl"
+        card_ctl["targets"] = ["bench.py"]   # its only target is the frozen bench
+        home3.save_card(card_ctl)
+        sp3 = os.path.join(td, "c3.json")
+        write_json_atomic(sp3, {"id": "t3", "goals": ["score_ctl"], "budget": {"experiments": 2}})
+        frozen_goal = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_campaign(home3, argparse.Namespace(action="start", file=sp3, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False))
+        except SBError:
+            frozen_goal = str((home3.campaign() or {}).get("halt_reason", "")).startswith("goal-frozen")
+        check("goal with only frozen targets halts at start", frozen_goal)
         # experiment 1: real improvement (N 40 -> 20)
         hp = os.path.join(td, "h.json")
         write_json_atomic(hp, {"operator": "algorithmic", "target": "work.py", "hypothesis": "halve N", "predicted": {"score": "-50%"}})
@@ -3001,6 +3073,16 @@ def selftest() -> int:
             cmd_distill_stats(home, argparse.Namespace(json=True))
         s = stats(home, home.campaign())
         check("stats count", s["experiments"] == 4 and s["accepted"] == 1 and s["discarded"] == 3)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_cost(home, argparse.Namespace(id=e1, tokens_in=None, tokens_out=None, wall_s=10.0, dollars=None, tier="medium"))
+        s2 = stats(home, home.campaign())
+        check("unreported tokens make dollars n/a", isinstance(s2["dollars_est"], str) and s2["dollars_est"].startswith("n/a"))
+        os.environ["SB_EST_TOKENS"] = '{"medium": [50000, 8000]}'
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_cost(home, argparse.Namespace(id=e1, tokens_in=None, tokens_out=None, wall_s=1.0, dollars=None, tier="medium"))
+        del os.environ["SB_EST_TOKENS"]
+        last_cost = [ev for ev in home.ledger_events(e1) if ev["event"] == "cost"][-1]["data"]
+        check("env token estimate is used and labelled", last_cost["token_source"] == "env-estimate" and last_cost["tokens_in"] == 50000 and last_cost["dollars"] > 0)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             cmd_next(home, argparse.Namespace(json=True, seed=1))
