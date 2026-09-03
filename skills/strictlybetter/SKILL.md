@@ -90,6 +90,10 @@ for f in sorted(os.listdir(os.path.join(home, "metrics"))):
     lv = (b.get(c["id"]) or {}).get("levels") or {}
     sig = (c.get("noise") or {}).get("sigma")
     print(f"{c['id']:24} {c['kind']:10} {c['direction']:9} {str(sig):>12} {str((lv.get('screen') or {}).get('secs_per_run')):>9} {str((lv.get('confirm') or {}).get('secs_per_run')):>10} {(c.get('probe') or {}).get('monotonic')}")
+    if c.get("proxy_for"):
+        print(f"  ladder: {c['id']} is a proxy for {c['proxy_for']} covers={json.dumps(c.get('covers') or [])} trust={c.get('trust')}")
+    if isinstance(c.get("audit"), dict):
+        print(f"  ladder: {c['id']} is a real instrument, audit={json.dumps(c['audit'])}")
 PY
 sed -n '/## Protected paths/,/^$/p' "$SB_REPO/.strictlybetter/profile.md"
 ```
@@ -110,11 +114,24 @@ Build the **recommended set**:
 - **budget**: `{"experiments": 30}` by default. Add `"hours"` when the user gave a time.
 - **protected paths**: the profile's proposed list. Frozen paths come from the cards.
 - **branch**: `sb/<campaign-id>`; **id**: `YYYY-MM-DD-<short-slug>`.
+- **audits** (only when the metrologist produced proxy cards, i.e. cards with `proxy_for`):
+  the proxies go under **goals** (probe `True`, sigma measured, like any goal) and the real
+  card they name goes under **audits**, never under goals or guardrails. Read the real card's
+  `audit` block (`every_accepts`, `discard_sample_rate`, `pairs`) and its confirm `secs_per_run`
+  from the table above; the question states the cadence and the cost in those numbers. The
+  engine refuses a proxy whose `proxy_for` is not in `audits`, and an audit card without an
+  `audit` block (docs/15).
 
 Ask **one** `AskUserQuestion` with the recommended set as the first option, in this shape:
 
 > Start campaign `<id>`? Goals: `<g>` (sigma s, ~N s/run). Guardrails: `<…>`. Diagnostics: `<…>`. Composition: `<pareto|frontier>` (with two or more goals). Budget: 30 experiments. Protected: `<paths>`. Frozen: `<paths>`. Branch `sb/<id>`.
 > Options: **Start with this set (recommended)** / **Edit goals or guardrails** / **Change budget or paths** / **Not now**.
+
+With proxy cards the question lists the two sets apart and says what the audits cost:
+
+> Start campaign `<id>`? Goals (proxies): `<p1>` (sigma s, ~N s/run, covers `<paths>`), `<p2>` (…, covers all). Audits (real instrument): `<r>` (~N s/run; audit at the first accept and then every `<every_accepts>` accepts, `<pairs>` pairs each side, so about `<2 × pairs × N>` s per audit; `<discard_sample_rate>` of discards re-measured with one pair; one audit at the end). Guardrails: `<…>`. Budget: 30 experiments. Protected: `<paths>`. Frozen: `<paths>`. Branch `sb/<id>`. The guarantee attaches to the proxies; the real metric moves only when an audit confirms it.
+
+The arithmetic in that sentence is `2 × pairs × secs_per_run`, a product of stored numbers; nothing else is computed.
 
 When two or more goals plausibly trade off, offer **Frontier (map the trade-off)** as the
 composition: it replaces **Change budget or paths** (the "Edit" answer covers those too), and
@@ -134,14 +151,18 @@ Write tool (the inbox is the one writable place) and start:
 #  "archetype_priors": {"algorithmic": [3, 3], "config": [1, 3]}}      # optional: the pack's operator_priors
 # frontier campaigns: "composition": "frontier" (two or more goals), optional "preference": {"weights": {"recall": 3, "scan_seconds": 1}},
 #  "frontier_max": 8   (docs/02 §2.3; without weights sb/<id> stays at the base until a member improves every goal)
+# proxy ladder: "goals": ["detect_replay_recall", "slice_recall"], "audits": ["recall"]   (docs/15; the real card carries the `audit` block)
 $SB campaign start --file "$SB_REPO/.strictlybetter/inbox/campaign.json"
 $SB status
 ```
 
 `campaign start` freezes the set, hashes the frozen paths, creates the branch, and baselines
-any metric that lacks a baseline at this commit. It refuses when a goal has no valid
-baseline or no measured sigma, and refuses `composition: frontier` with fewer than two goals;
-if it does, print its message and stop (the metrics skill demotes the offender). `archetype_priors` is the `operator_priors` object from
+any metric that lacks a baseline at this commit (an audit card included, so with a proxy ladder
+the real instrument runs at start; say so before running it). It refuses when a goal has no valid
+baseline or no measured sigma, refuses `composition: frontier` with fewer than two goals, and
+refuses a mis-wired ladder (a proxy whose `proxy_for` is not in `audits`, an audit card without
+an `audit` block or listed as a goal); if it does, print its message and stop (the metrics skill
+demotes the offender). `archetype_priors` is the `operator_priors` object from
 `$SB_ROOT/archetypes/<archetype-id>.json` when that file exists; leave it out otherwise.
 
 ## 5 · Running → one cycle

@@ -118,6 +118,16 @@ A run is **invalid**, and never compared, when: the command times out; it exits 
 Cost: `sb cost <id> --wall-s S --tier T` with no tokens records `dollars: null` and the campaign's dollar figure reads `n/a (tokens not reported)`; set `SB_EST_TOKENS='{"low":[in,out],"medium":[in,out],"high":[in,out]}'` in the environment for an order-of-magnitude estimate, labelled `token_source: env-estimate` in the ledger (issue #6).
 
 
+## Fields added in 1.3.0 (the proxy ladder, docs/15)
+
+| Field | Required | Meaning |
+|---|---|---|
+| `proxy_for` | proxies: yes | The id of the real metric's card this card stands in for (a stage replayed from recorded intermediates, or the pipeline on a frozen slice). A proxy is listed as a campaign **goal** and is screened, confirmed, and ratcheted like any goal. `campaign start` refuses a proxy whose `proxy_for` is not in the campaign's `audits`. |
+| `trust` | engine | `provisional` (set at `campaign start` when absent) → `validated` → `suspect` → `demoted`, moved only by audits on fixed thresholds (docs/14 §14.12; `validated` after 4 audited changes with agreement ≥ 0.75 and ≤ 1 false promotion). Author it as `null` or omit it. Not part of the card fingerprint. A demoted proxy no longer covers any target at pre-registration; it is still measured. |
+| `covers` | proxies: no | Repo-relative path patterns (`dir/` prefix, glob, exact path) the proxy is valid for: the stage's paths for a component proxy; omit or `[]` for a slice proxy that covers everything. In a campaign with `audits`, `sb prereg` refuses a hypothesis whose `target` (before the first `:`) matches no non-demoted proxy's `covers` unless some non-demoted proxy has none. Not the same as `targets`. |
+| `audit` | audit cards: yes | `{"every_accepts": 3, "discard_sample_rate": 0.1, "pairs": 3, "alpha": 0.05}` (the defaults) on the real instrument's card, which keeps `kind: goal` and is listed under the campaign's `audits`, never under goals. Audits measure the card at its `confirm` fidelity (command, timeout, holdout): at the first accept and then every `every_accepts` accepts (head vs last audited commit, `pairs` interleaved pairs), on a sampled `discard_sample_rate` of proxy discards (one pair vs the experiment's base), and at campaign end (head vs base). Verdicts `confirmed | direction | no-change | worse | invalid`; 3 pairs cannot reach `confirmed` at 0.05. |
+
+
 ## Instrument design rules (from the external-adversary gate)
 
 A timing instrument that discards results and hashes once is blind to deferred work, background

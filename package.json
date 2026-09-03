@@ -1,6 +1,6 @@
 {
   "name": "opencode-strictlybetter",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Universal noise-aware research loop for OpenCode and pi: discover metrics, measure sigma, pre-register experiments, blind-judge, confirm on holdout. Every merge is strictly better.",
   "type": "module",
   "license": "MIT",

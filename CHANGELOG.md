@@ -1,5 +1,74 @@
 # Changelog
 
+## 1.3.0 — 2026-09-03 · the proxy ladder: iterating when the real instrument takes hours
+
+Ten confirmation pairs on a four-hour instrument are eighty hours per candidate. 1.3.0 lets a campaign
+optimize cheap proxies of a slow instrument and pay the real instrument only at audits, with the
+proxy's trust earned from those audits and the guarantee stated where it actually holds.
+
+### Added
+- **Engine.** Card fields `proxy_for` (the real card a proxy stands in for), `covers` (the paths the
+  proxy is valid for), `trust` (engine-owned: `provisional | validated | suspect | demoted`, excluded
+  from the card fingerprint), and `audit` (`every_accepts`, `discard_sample_rate`, `pairs`, `alpha`)
+  on the real card, which keeps `kind: goal`. Campaign list `audits`; `campaign start` checks the
+  wiring (an audit card needs `audit` and may not be a goal or guardrail; a proxy's `proxy_for` must
+  be in `audits`; a proxy without `trust` becomes `provisional`), fingerprints and baselines the
+  audit cards, and records `last_audit_commit`, `audit_history`, `proxy_fidelity`,
+  `accepts_since_audit`, `audit_wall_s`. `sb prereg` refuses a target no non-demoted proxy covers.
+  `run_audit`: the real card measured at its confirm fidelity, `pairs` interleaved pairs, head vs the
+  last audited commit, exact one-sided sign-flip at the card's alpha, verdicts
+  `confirmed | direction | no-change | worse | invalid`; the real metric's baseline and ratchet move
+  only here, on `confirmed` or `direction`, with `audited: true`. Audits run at the first accept and
+  then every `every_accepts` accepts (`sb accept` prints an `audit` JSON line), on a deterministic
+  sample of `noise`/`regression` discards (sha256 of `campaign:id` below `discard_sample_rate`; one
+  pair vs the experiment's base; `sb discard` prints `discard_audit`), and at `campaign end` (head vs
+  base). Per-proxy fidelity (`audits`, `agree`, `false_promotions`, `misses`, `history`,
+  `exchange_rates`) and `update_trust` on fixed thresholds (`TRUST_*`), with a `trust` ledger event
+  and the halt `proxy-demoted:<id>:no-confirming-proxy-left` when no goal with another trust remains.
+  `stats()`: `iterations_per_hour`, `accepts_per_hour`, `audit_wall_s`, `audits_run`,
+  `proxy_fidelity`. Report: "Audited real metrics (the proxy ladder)" (every audit; every proxy's
+  fidelity row) and a ladder-efficiency line. Constants `AUDIT_EVERY_ACCEPTS` 3, `AUDIT_DISCARD_RATE`
+  0.10, `AUDIT_PAIRS` 3, `AUDIT_ALPHA` 0.05, `TRUST_VALIDATE_MIN_AUDITS` 4, `TRUST_VALIDATE_MIN_AGREE`
+  0.75, `TRUST_SUSPECT_WINDOW` 4, `TRUST_DEMOTE_ON_NEXT`. Selftest section "proxy ladder" (12 checks
+  on a temp repo with a fake slow instrument).
+- **Docs.** `docs/15-proxy-ladder.md` is now the field reference and rationale as built (status line,
+  decisions taken, every mechanic stated as the code behaves); `docs/14` §14.12 (the audit test, the
+  fidelity record, the trust rules with their constants, the discard sampling rule, iterations per
+  hour and ladder efficiency); `docs/13` §13.9 (the guarantee attaches to the proxy; the real metric
+  has audited movement only; `direction` is not a significance claim; trust is a heuristic);
+  `docs/02` §2.1 field notes for the four card fields, §2.3 `audits` with the wiring rules, §2.5 the
+  audited ratchet; `docs/05` §5.8 new stats fields and §5.10 "Lever 7: the proxy ladder"; README
+  "Cost".
+- **Skills and templates.** `sb-metrologist`: "Slow instruments: build a proxy ladder" (record and
+  replay, slice proxies with holdout slices, `covers`, the `audit` block, degradation recipes, the
+  three things a replay proxy cannot see). `/strictlybetter` gate 1 lists goals (proxies) and
+  `audits` (real instrument) apart and states the audit cadence and cost; `/strictlybetter:run`
+  quotes the `audit` and `discard_audit` lines in the cycle summary; `/strictlybetter:status`
+  prints `audits_run`, `audit_wall_s`, `iterations_per_hour`, and each proxy's fidelity.
+  `templates/card.json.tmpl` and `templates/campaign.json.tmpl` carry the new keys with
+  `_comment` notes; `skills/_shared/metric-card.md` and `ledger.md` have the fields and the `audit`
+  and `trust` events.
+
+### Decisions
+- Audit at the first accept and then every `every_accepts` (default 3); `discard_sample_rate` 0.10;
+  `pairs` 3, a direction check unless the card raises it (five pairs reach 0.05).
+- A demoted proxy keeps screening and stops confirming, enforced at pre-registration (it no longer
+  covers any target); experiments already open still measure it. The campaign halts only when no
+  goal with another trust remains.
+- Audits block inside `sb accept`; no scheduled audit and no provisional accept state.
+- No recorded full run is required at start; the engine baselines the audit card at start like any
+  card (unless `--no-baseline`). Every proxy must pass its degradation probe (the metrics skill's
+  rule) and the real card must declare `audit` (the engine's).
+
+### What is not guaranteed
+The exact test and the family-wise bound apply to the proxy goals only. The real metric has audited
+movement: an exact but low-powered test per audit at the card's unsplit alpha, `direction` when every
+pair agrees without reaching alpha, one pair with no noise floor on a sampled discard. Trust labels
+summarize the fidelity record and bound nothing.
+
+Gates run for this release (2026-09-03, one MacBook): selftest 134/134 (a planted proxy-ladder campaign: first-accept audit, cadence, sampled discard audit, trust to validated, a proxy-only win audited worse with the real ratchet unmoved and trust dropping to suspect, final audit at end); unittest 62 OK; bun 17/17; mutation check 30/30 caught (four rows for the audit mechanics, budget row re-anchored); fuzz 0 crashes on 2 fresh seeds × 300 corrupt states; docs written from the code by an independent pass. Not run: a live campaign on a real slow instrument (the design's own example, a four-hour scan, has no run yet); the benchmarks are unchanged from 1.2.0 (no audit card in any fixture).
+Benchmark: unchanged from 1.2.0 (see that entry); no fixture with a slow real instrument exists yet, so the ladder's iterations-per-hour claim is untested on real hardware.
+
 ## 1.2.1 — 2026-09-03 · what the frontier docs pass caught
 
 ### Fixed

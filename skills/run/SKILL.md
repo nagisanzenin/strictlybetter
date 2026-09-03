@@ -146,6 +146,15 @@ Work through this list for each id; stop at the first branch that ends it.
 7. **Cost** (before the final verb, so the bandit sees it) → `$SB cost <id> --wall-s <experimenter seconds> --tier <low|medium|high>`. Tokens are unknown on this platform; the dollars column is an estimate from zero tokens, and the cycle summary says "estimated".
 8. **Final verb** → confirm `accept` → `$SB accept <id>` (fast-forwards the campaign branch, ratchets the baseline). If `accept` reports "not a fast-forward", treat as STALE in step 3. Confirm `discard` → `$SB discard <id> --reason <reason> --archive` with `<reason>` the confirm line's `"reason"` when its prefix is in the fixed vocabulary, else `noise`.
    In a frontier campaign `accept` adds a member instead of fast-forwarding; its output has `member`, `parent_member`, `retired`, `preferred_member`. Quote them in (g). A confirm reason `dominated:<member>` is not in the discard vocabulary: discard with `--reason dominated --archive` (the ledger's `confirm` event keeps the dominated reason).
+   In a campaign with `audits` (a proxy ladder, docs/15) `accept` may first run the real instrument: at the first accept and then every `every_accepts` accepts, blocking for as long as `pairs` pairs of it take (hours). When it did, `accept` prints one line before its own, and you quote it verbatim in (g):
+   ```
+   {"audit": {"recall": {"verdict": "direction", "p": 0.125, "n_pairs": 3, "median_improvement": 0.012}}, "wall_s": 43210.5}
+   ```
+   `verdict` is one of `confirmed | direction | no-change | worse | invalid`; `direction` means every pair improved but the pairs cannot reach alpha, and it is not a significance claim. A `discard` in such a campaign may print, before its own line, the sampled-audit line, which means the engine ran one pair of the real instrument on the discarded commit:
+   ```
+   {"discard_audit": "sampled", "id": "e0007"}
+   ```
+   Quote it in (g) too. Neither line changes what you do next.
 
 Judge payload (step 5): the engine composes it, so no transcript text can leak into it:
 
@@ -174,12 +183,13 @@ $SB distill-stats --json | tee "$SB_REPO/.strictlybetter/inbox/stats.json" | pyt
   then `$SB inheritance write --file "$SB_REPO/.strictlybetter/inbox/inheritance.md"`.
 - `explore:levelN` → nothing extra; the next brief widens `allowed_diff_sizes` and the mix.
 
-## (g) Cycle summary (three lines, four in a frontier campaign, quoted numbers)
+## (g) Cycle summary (three lines, four in a frontier campaign or a proxy-ladder campaign, quoted numbers)
 
 ```
 cycle: <n> pre-registered, <k> accepted (<ids>), <m> discarded (<id: reason>, …), <b> blocked
 frontier: <goal> best=<value> sigma=<sigma>  (from `$SB next`)
 frontier members: <n> active (<ids>) · preferred <id> · next parent <id>  (frontier campaigns only, from `$SB next`)
+audit: <the `audit` line `accept` printed, verbatim> · discard audits sampled: <ids from the `discard_audit` lines, or none>  (campaigns with `audits` only, when either line appeared this cycle)
 next: <decision from distill-stats> · budget left <…> · wall <…>s · dollars estimated $<…>
 ```
 

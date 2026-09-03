@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 # ----------------------------------------------------------------------------
 # Constants (fixed before data; see docs/04 and docs/06). Do not tune to results.

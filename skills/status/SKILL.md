@@ -44,6 +44,7 @@ $SB status --json | grep -q '"campaign": null' || $SB next    # the cold-start b
 $SB status
 $SB status --json | grep -q '"campaign": null' || { $SB next; $SB budget; }
 $SB campaign show 2>/dev/null | grep -q '"composition": "frontier"' && $SB frontier   # frontier campaigns: the members and the preferred point
+$SB campaign show 2>/dev/null | grep -q '"audits": \[$' && $SB status --json | python3 -c 'import json,sys; s=json.load(sys.stdin); print("audits_run", s["audits_run"], "audit_wall_s", s["audit_wall_s"], "iterations_per_hour", s["iterations_per_hour"]); [print("proxy", p, json.dumps(f)) for p, f in s["proxy_fidelity"].items()]'   # proxy-ladder campaigns: the audit counters and each proxy's fidelity record
 ```
 
 With no campaign, `status` says how many cards and whether a profile exists; suggest
@@ -51,6 +52,10 @@ With no campaign, `status` says how many cards and whether a profile exists; sug
 (experiments, accepted, promoted, budget left, branch, head, wall, estimated dollars), the
 brief (frontier, accepted so far, dead ends, open experiments, operator mix), and the budget
 counters. In a frontier campaign `sb frontier` is a fourth: the members with their confirm
-medians, `retired:<by>` marks, and `*` on the preferred point. Add at most two sentences of your own, none of them a number the engine did not
+medians, `retired:<by>` marks, and `*` on the preferred point. In a campaign with `audits` (a
+proxy ladder, docs/15) the fourth is the `status --json` extract: `audits_run`, `audit_wall_s`,
+`iterations_per_hour`, and one `proxy_fidelity` line per proxy (`audits`, `agree`,
+`false_promotions`, `misses`, `exchange_rates`), quoted as printed; the proxy's current `trust`
+is on its card (`$SB card show <id>` if the user asks). Add at most two sentences of your own, none of them a number the engine did not
 print. A `halted` status gets its `halt_reason` repeated and the sentence
 *"`sb campaign resume` after review."*

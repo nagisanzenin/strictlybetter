@@ -146,3 +146,71 @@ p̂ = a/n,  z = 1.96:   centre = (p̂ + z²/2n) / (1 + z²/n),   half-width = z�
 ## 14.11 What is not computed
 
 No confidence interval on effect sizes (medians and p-values only); no sequential always-valid p (stages are fixed in advance instead); no correction across campaigns; no test on diagnostics; no error rate for the screen, the judge, the anomaly breaker, or non-dominance.
+
+## 14.12 Proxy ladder audits (`audit_spec`, `run_audit`, `update_trust`, `proxies_claim`)
+
+A campaign with an `audits` list optimizes proxy goals (`proxy_for` set) and measures the real card `R` only at audits (`docs/15`). Constants: `AUDIT_EVERY_ACCEPTS = 3`, `AUDIT_DISCARD_RATE = 0.10`, `AUDIT_PAIRS = 3`, `AUDIT_ALPHA = 0.05`; each is the default for the matching key of the real card's `audit` object.
+
+**When an audit runs.**
+
+```
+accept audit   at accept number 1, and then whenever accepts_since_audit ≥ E,  E = min over audit cards of every_accepts
+               (the counter resets to 0 after an accept or end audit; with E = 3 the audits fall at accepts 1, 4, 7, …)
+               head vs the last audited commit,  r_a = max over audit cards of audit.pairs
+discard audit  for a discard with reason noise | regression, a submitted commit, and integrity passed, while running:
+               u = int(sha256("<campaign id>:<experiment id>")[:8], 16) / 0xFFFFFFFF
+               sampled ⇔ u < ρ,  ρ = max over audit cards of discard_sample_rate
+               the experiment's commit vs its base commit, 1 pair
+end audit      sb campaign end, when head ≠ base: head vs base, r_a pairs
+```
+
+**The audit test.** `r_a` interleaved pairs (ABBA, same holdout value per pair) of the real card at its `confirm` fidelity, `d_i = s · (head_i − against_i)`, and the one-sided sign-flip p of §14.4 on `d` at the card's `α_audit` (no multiplicity split):
+
+```
+invalid    ⇔ no valid pair
+confirmed  ⇔ p ≤ α_audit  and  median(d) > 0
+direction  ⇔ not confirmed  and  every d_i > 0        (with r_a = 3 the smallest p is 2^−3 = 0.125 > 0.05, so a unanimous audit is `direction`; r_a ≥ 5 can reach `confirmed`)
+worse      ⇔ every d_i < 0
+no-change  otherwise                                   (mixed signs, or ties)
+```
+
+With one pair (a discard audit) `confirmed` is unreachable (smallest p = 0.5): `direction ⇔ d₁ > 0`, `worse ⇔ d₁ < 0`, `no-change ⇔ d₁ = 0`. No noise floor enters any audit verdict.
+
+**Ratchet.** At accept and end audits, for each audit card with verdict `confirmed` or `direction`: `baseline.best ← head median`, `commit ← head`, `audited ← true`; `ratchet.json` gets the same with `audit_verdict`. A discard audit moves nothing. The audit's wall-clock is added to `spent.wall_s` and to `audit_wall_s`.
+
+**The fidelity record** (`campaign.json` `proxy_fidelity[P]`, one per proxy goal `P` with `R = proxy_for(P)`). The proxy's claim `c` for the experiment is `better` when its confirm comparison had `improved`, else `not-better` (a discard audit forces `not-better`). With real verdict `v`:
+
+```
+agree            ⇔ (c = better and v ∈ {confirmed, direction})  or  (c = not-better and v ∈ {worse, no-change})
+false promotion  ⇔ c = better and v ∈ {worse, no-change}
+miss             ⇔ c = not-better and v ∈ {confirmed, direction}
+v = invalid      counts as a disagreement, neither a false promotion nor a miss
+audits += 1;  agree += 1 if agree;  history ← last 20 of (1 if agree else 0)
+agreement        A = agree / audits
+exchange rate    x = median(d) / Δ_P    appended when agree, c = better, and both are non-zero (Δ_P the proxy's confirm delta, signed positive = better)
+                 the report prints median(x)
+```
+
+An end audit updates no record (no experiment claimed it).
+
+**Trust transitions** (`TRUST_VALIDATE_MIN_AUDITS = 4`, `TRUST_VALIDATE_MIN_AGREE = 0.75`, `TRUST_SUSPECT_WINDOW = 4`, `TRUST_DEMOTE_ON_NEXT = true`; `last` is the newest history entry, `recent` the last 4):
+
+```
+provisional → validated   audits ≥ 4  and  A ≥ 0.75  and  false_promotions ≤ 1
+validated   → suspect     #{0 ∈ recent} ≥ 2   or   (last = 0  and  false_promotions ≥ 1  and  audits > 4)
+suspect     → demoted     last = 0
+suspect     → validated   |recent| = 4  and  #{0 ∈ recent} = 0
+halt                      after a demotion, no goal with trust ≠ demoted remains   (proxy-demoted:<P>:no-confirming-proxy-left)
+```
+
+A demoted proxy is skipped when `sb prereg` looks for a covering proxy; it is otherwise measured like any goal. The transitions carry no error rate.
+
+**Iterations per hour and ladder efficiency** (`stats()`, `write_report`), with `W = spent.wall_s` (measurement, audits, and `sb cost` wall-clock), `N` experiments, `A` accepts, `P` promoted:
+
+```
+iterations_per_hour = 3600 · N / W          accepts_per_hour = 3600 · A / W          (null while W = 0)
+audit_wall_s        = Σ audits wall_s       audits_run = |audit_history|
+ladder efficiency   W_audit = audit_wall_s   against   W_would = Σ_R secs_per_run(R, confirm) · 2 · CONFIRM_REPEATS · max(1, P)
+```
+
+`secs_per_run(R, confirm)` is the real card's confirm-level baseline cost (0 when the card was never baselined, which makes `W_would` 0). Not computed: a per-tier split of runs and wall-clock, an interval on the exchange rate, or any error rate on the trust thresholds.

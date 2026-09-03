@@ -69,6 +69,22 @@ The preferred point without weights is the knee over the frontier's own extremes
 
 **No ratchet.** A frontier campaign writes neither `ratchet.json` nor `baseline.json`. Nothing it accepts becomes a floor for a later campaign, and the campaign claims nothing about the project's global frontier of `02-metrics.md` §2.5. What it delivers is the archive, the branches, and the report's Frontier table, with the exact test behind each link recorded in the ledger's `confirm` events.
 
+## 13.9 Proxy campaigns: the guarantee attaches to the proxy
+
+A campaign with an `audits` list (`15-proxy-ladder.md`) optimizes goals that carry `proxy_for` and runs the real instrument only at audits. The formulas are in `docs/14` §14.12. What carries an error rate and what does not:
+
+**The tested part.** Every accept was confirmed on the proxy goals with the test of §13.2: `r` interleaved (candidate, head) pairs of the proxy, the exact sign-flip p at `α_goal`, the practical floor, the guardrails. The bound of §13.3 applies as written, to the proxy metric. "Accepted" means: better than its parent on the proxy, with family-wise false-accept probability at most `α` over the campaign, under the assumptions of §13.2 and with the breakers of §13.4.
+
+**The real metric has audited movement only.** Between audits the branch carries changes that beat the head on the proxy and were never measured on the real instrument. An audit is an exact one-sided sign-flip test on `pairs` interleaved (head, last audited commit) pairs at the real card's `audit.alpha`, and the report prints its p and its pair count for every audit. Three points limit what that means:
+
+- `pairs` defaults to 3, so the smallest attainable p is 0.125 and the default audit cannot reach 0.05. The verdict `direction` (every pair improved, p above alpha) is **not a significance claim**. It says the sign agreed three times. The real metric's ratchet moves on `direction` as well as on `confirmed`; a floor set by a `direction` audit is an audited observation, not a tested one. A card that buys five or more pairs can reach `confirmed`.
+- The audit's alpha is the card's, unsplit. Audits are not counted in the campaign's `K`, and no family-wise claim covers them. With `A` audits at alpha 0.05, up to `0.05 · A` `confirmed` verdicts are expected on a null real metric.
+- A discard audit is one pair. It has no noise floor and no p worth reading; it exists to count misses for the fidelity record and it claims nothing.
+
+**Trust is a heuristic.** `provisional`, `validated`, `suspect`, `demoted` move on counts (four audits, agreement 0.75, one false promotion, two disagreements in four). They summarize the fidelity record; they do not bound the proxy's error rate against the real metric, and a `validated` proxy can still promote a change the real instrument would reject. The record itself (agree, false promotions, misses, exchange rate) is the evidence; read it, not the label. A one-pair discard audit registers noise as a miss, so the miss count is pessimistic on a noisy instrument.
+
+**Where the numbers go.** The proxy's ratchet moves at every accept, as any goal's does. The real metric's `baseline.json` and `ratchet.json` entries move only at accept and end audits, carry `audited: true` and the verdict, and are what a later campaign inherits. The report's "Audited real metrics" section lists every audit with its verdict, p, pairs, and wall seconds, and every proxy's fidelity row. Nothing is averaged across proxy and real.
+
 ## References
 
 - Fisher, R. A. (1935). *The Design of Experiments*. Oliver and Boyd, Edinburgh. Verified 2026-09-03.

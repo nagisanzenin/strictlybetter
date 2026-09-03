@@ -25,7 +25,7 @@ Point it at any repo or science project. It figures out what to measure, learns 
       │   can paste as the PR description, and main exactly as you left it
 ```
 
-`selftest 117/117` · one stdlib Python file, zero network · Claude Code, Codex, OpenCode, Hermes, Antigravity, OpenClaw, Pi, DeepSeek Harness, ZCode
+`selftest 134/134` · one stdlib Python file, zero network · Claude Code, Codex, OpenCode, Hermes, Antigravity, OpenClaw, Pi, DeepSeek Harness, ZCode
 
 ---
 
@@ -235,7 +235,7 @@ Everything the skills do goes through one engine you can also run directly:
 
 ```bash
 python3 scripts/sb.py status        # or: next · report · budget · frontier · ledger view <id> · doctor
-python3 scripts/sb.py selftest      # 117 checks: three campaigns on temp repos (walls, multi-repo + services, a planted trade-off frontier)
+python3 scripts/sb.py selftest      # 134 checks: four campaigns on temp repos (walls, multi-repo + services, a trade-off frontier, a proxy ladder)
 ```
 
 `python3 scripts/sb.py --help` is the full command reference.
@@ -285,6 +285,11 @@ The loop reports its own **cost per accepted improvement** in dollars and minute
 - A bandit learns which kinds of change pay off *in this repo* and stops proposing the ones that never do.
 - Mechanical edits go to a cheap model tier; judgment goes to a strong one.
 - If too many screening winners fail confirmation, the engine distrusts the screening fidelity and raises repeats rather than keep guessing.
+
+When the real instrument takes four hours (a full scan, a training run), the loop screens and confirms on cheap proxies the metrologist builds from one recorded run, and pays the real instrument only at audits: the first accept, then every third, a tenth of discards, and the end ([docs/15](docs/15-proxy-ladder.md)).
+The statistical guarantee attaches to the proxy; the real metric has audited movement only, and its ratchet moves only when an audit confirms the direction.
+Every proxy earns a trust label from the audits (agreement, false promotions, misses, exchange rate), and a proxy that keeps disagreeing is demoted.
+The report shows both: the proxy's tested movement, and every audit of the real metric with its verdict, p, and pair count.
 
 Nothing is optimized at the expense of correctness: the noise floor is never lowered to save money, confirmation is never skipped, the judge is never skipped.
 

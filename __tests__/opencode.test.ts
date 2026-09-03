@@ -83,7 +83,7 @@ describe("agent translation", () => {
 
 describe("selfExtract", () => {
   it("extracts skills (with _shared), transformed agents, and generated commands; then no-ops", () => {
-    const r = selfExtract(ROOT, tmp, "1.2.1")
+    const r = selfExtract(ROOT, tmp, "1.3.0")
     expect(r.target).toBe(target())
     expect(r.freshlyExtracted).toBe(true)
     expect(existsSync(resolve(target(), "skills", "run", "SKILL.md"))).toBe(true)
@@ -92,15 +92,15 @@ describe("selfExtract", () => {
     for (const name of Object.keys(COMMANDS_DEF)) expect(existsSync(resolve(target(), "commands", `${name}.md`))).toBe(true)
     expect(existsSync(resolve(target(), "scripts"))).toBe(false)   // the engine is never extracted
     const rec = readVersionRecord(target())
-    expect(rec.version).toBe("1.2.1")
+    expect(rec.version).toBe("1.3.0")
     expect(Object.keys(rec.files || {}).length).toBeGreaterThan(10)
-    const again = selfExtract(ROOT, tmp, "1.2.1")
+    const again = selfExtract(ROOT, tmp, "1.3.0")
     expect(again.freshlyExtracted).toBe(false)
     expect(again.report).toBeUndefined()
   })
 
   it("on a version bump: refreshes our unmodified copies, preserves user edits, never touches user files", () => {
-    selfExtract(ROOT, tmp, "1.2.1")
+    selfExtract(ROOT, tmp, "1.3.0")
     const edited = resolve(target(), "skills", "run", "SKILL.md")
     writeFileSync(edited, "# my edited run skill\n")
     // Simulate a stale copy WE wrote: rewrite the file and record its hash as ours.
@@ -116,7 +116,7 @@ describe("selfExtract", () => {
 
     const r = selfExtract(ROOT, tmp, "9.9.9")
     expect(r.freshlyExtracted).toBe(false)
-    expect(r.prevVersion).toBe("1.2.1")
+    expect(r.prevVersion).toBe("1.3.0")
     expect(readFileSync(edited, "utf-8")).toBe("# my edited run skill\n")
     expect(r.report!.preserved).toContain("skills/run/SKILL.md")
     expect(readFileSync(stale, "utf-8")).toBe(readFileSync(resolve(ROOT, "skills", "status", "SKILL.md"), "utf-8"))

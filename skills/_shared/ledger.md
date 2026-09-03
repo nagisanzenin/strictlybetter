@@ -25,12 +25,18 @@ the inheritance body and the ledger disagree, the ledger wins.
 | `accept` | `reason, accepted_commit, branch` | `sb accept` |
 | `discard` | `reason, archived, archive_key` | `sb discard` |
 | `cost` | `tokens_in, tokens_out, wall_s, dollars, tier, estimated` | `sb cost` |
+| `audit` | `kind (accept\|discard), commit, against, pairs, experiment, at, wall_s, metrics{real id: {verdict, p, n_pairs, median_improvement, head_median, against_median, alpha, unit}}, proxies{proxy id: {said (better\|not-better), agree}}` (proxy ladder, docs/15; `verdict` is `confirmed\|direction\|no-change\|worse\|invalid`) | `sb accept` (at the first accept and then every `every_accepts`), `sb discard` (a sampled discard, one pair vs the experiment's base) |
 
 ## Campaign-level events (`id: "campaign"`)
 
 `start`, `baseline`, `halt`, `resume`, `end`, `explore` (exploration level raised),
 `screen-untrusted` (false-promotion budget exceeded; screen repeats doubled),
-`holdout-rotate`, `distill`.
+`holdout-rotate`, `distill`, and for a proxy ladder (docs/15):
+
+| event | data | written by |
+|---|---|---|
+| `audit` | as the per-experiment `audit` event with `kind: end`, `experiment: null`, `against` the base commit, and no `proxies` | `sb campaign end` (when the head moved) |
+| `trust` | `proxy, from, to, fidelity{audits, agree, false_promotions, misses, exchange_rates}` | the audit that moved a proxy's `trust` (`provisional → validated`, `validated → suspect`, `suspect → demoted`, `suspect → validated`) |
 
 ## The merged experiment record
 
@@ -56,6 +62,8 @@ A `comparisons[]` entry, per goal and guardrail:
 
 Not carried into the merged record (read the `prereg` event or the worktree instead):
 `base_commit`. The parent of the experiment's commit is the base: `git -C <worktree> rev-parse HEAD^`.
+An experiment's `audit` event appears in its `events[]` and nowhere else in the merged record;
+`campaign.json` `audit_history` holds every audit record in order.
 
 ## Discard reasons (fixed vocabulary)
 
@@ -76,7 +84,8 @@ two failing submits in a row halt the campaign.
 differs from the one taken at `campaign start`; checked before every decision),
 `card-tampered:<id>`, `card-missing:<id>`, `gamed-twice`, `holdout-gap:<ratio>`,
 `budget:<dimension>`, `instrument-unusable:<metric>:mde=<value>`, `ratchet-regression:<metric>`,
-`manual` (or the `--reason` given to `sb campaign halt`).
+`proxy-demoted:<proxy>:no-confirming-proxy-left` (a proxy was demoted and no goal with another
+trust remains), `manual` (or the `--reason` given to `sb campaign halt`).
 
 ## Reading it
 

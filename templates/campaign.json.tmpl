@@ -7,6 +7,8 @@
   "goals": ["{{goal_metric_id}}"],
   "guardrails": ["{{guardrail_metric_id}}"],
   "diagnostics": [],
+  "audits": [],
+  "_comment_audits": "Proxy ladder (docs/15). Ids of the real-instrument cards, each carrying an `audit` block and kind goal, never also a goal or guardrail here. Every goal or guardrail with proxy_for must name a card in this list. Audit cards are fingerprinted and baselined at start (the real instrument runs once per level with -k repeats unless --no-baseline), measured afterwards only at audits: the first accept and then every every_accepts accepts (head vs last audited commit, pairs pairs), a sampled fraction of proxy discards (one pair vs the experiment's base), and campaign end (head vs base). Their ratchet moves only on an audit verdict of confirmed or direction. The engine adds last_audit_commit, audit_history, proxy_fidelity, accepts_since_audit, audit_wall_s. The guarantee attaches to the proxy goals; the real metric has audited movement only (docs/13 §13.9).",
   "inherited_ratchet": [],
   "composition": "pareto",
   "oec_weights": null,

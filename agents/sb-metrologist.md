@@ -116,3 +116,51 @@ under every seed; only the blind judge stopped them. When you write or adopt a t
   between repeats, so in-process caches do not survive;
 - list these three as `gaming_risks` when the instrument cannot do them, so the judge looks for
   proxies, worker threads, and caches keyed on the inputs.
+
+
+## Slow instruments: build a proxy ladder (docs/15)
+
+When the profile's only honest goal instrument takes hours per run (a full scan, a training run,
+a sweep: `command_receipts` say so), ten confirmation pairs are not a loop. Do not write that
+card as the campaign's goal. Build a ladder: cheap proxies the loop optimizes, and the real card
+audited on a cadence. The engine wires them; you write the cards.
+
+1. **Record one real run** if a recording does not already exist: per-stage wall-clock and the
+   intermediate artifacts between stages (crawl output, context bundle, fuzz corpus, detector
+   inputs), stored under a path you freeze. From the profile, attribute the time or the error the
+   goal measures to a stage. An existing recording is fine; the engine does not require a fresh one.
+2. **Component proxies** (tier 0), one per stage that matters: a replay harness that feeds the
+   recorded input of stage N into stage N alone and prints the stage's metric as a `METRIC` line.
+   Seconds to minutes. Freeze the harness and the recording in `integrity.frozen_paths`.
+3. **A slice proxy** (tier 1): the whole pipeline on a frozen small subset of inputs (one target,
+   one epoch, one parameter setting). Minutes. Give it three **holdout slices** the experimenter
+   never sees (`fidelity.confirm.holdout`, kind `arg` or `env`), and no `covers`, so it is valid
+   for every target and is the confirming proxy of last resort.
+4. **Wire each proxy card**: `"kind": "goal"`, `"proxy_for": "<real card id>"`, and `"covers"`
+   naming the stage's paths (`["hand/detect/"]`) on a component proxy. Leave `trust` out; the
+   engine sets it to `provisional` at campaign start and moves it only through audits. `targets`
+   keeps its usual meaning.
+5. **The real card** keeps `"kind": "goal"` and its hours-long `measure`, gets a `confirm`
+   holdout, and declares `"audit": {"every_accepts": 3, "discard_sample_rate": 0.1, "pairs": 3,
+   "alpha": 0.05}` (these are the defaults; raise `pairs` when hours allow, since three pairs is a
+   direction check). It goes under the campaign's `audits`, never under goals. `campaign start`
+   refuses a proxy whose `proxy_for` is not in `audits`, and an audit card that is also a goal.
+6. **A degradation recipe for every proxy**, as for any card: a known slowdown or a known error
+   in the stage the proxy replays must move the proxy the wrong way by more than sigma. The
+   metrics skill probes every goal; a proxy that fails its probe is demoted to diagnostic and the
+   ladder loses a rung. Verify each anchor now.
+7. **Say in `gaming_risks` what a replay proxy cannot see.** Three things by construction: a change
+   to what an upstream stage produces (the replay consumes the old recording, so a crawler that
+   finds different pages is invisible to the detect replay); a change whose effect lands in a
+   stage other than the one replayed (work moved across a stage boundary looks like a win on one
+   proxy and is paid for elsewhere); and everything the real run does that the replay skips (I/O,
+   network, concurrency, warm caches, the real input distribution). `covers` is the engine's
+   defence against the first; the slice proxy sees the second; only the audit sees the third.
+
+Card cost: the real card's `expected_duration_s` and `timeout_s` must fit the audit (hours), and
+the campaign's `budget.hours`, if set, must leave room for the audits, since their wall-clock is
+charged to the campaign. Two settings keep the real instrument's run count honest: `"fidelity":
+{"screen": {"skip": true}}` so `campaign start` baselines it at `confirm` only (it measures every
+level the card has, `--repeats` times each), and `"warmup": 0` in `measure`, since a time-unit
+card otherwise gets one unmeasured run per side per level and per audit. Say in `gaming_risks`
+that no warm-up is taken, so the judge looks for cold-cache effects.
