@@ -234,7 +234,7 @@ Platforms differ only in how hooks fire. Without a pre-edit hook, the gate-time 
 Everything the skills do goes through one engine you can also run directly:
 
 ```bash
-python3 scripts/sb.py status        # or: next · report · budget · ledger view <id> · doctor
+python3 scripts/sb.py status        # or: next · report · budget · frontier · ledger view <id> · doctor
 python3 scripts/sb.py selftest      # 88 checks, including two full campaigns on temp repos (walls, multi-repo, services)
 ```
 
@@ -253,6 +253,12 @@ Examples of goals the packs know how to measure: benchmark throughput, compile t
 A greenfield project with no tests or benches yet gets an *instrument campaign* first: the loop builds the measurement before it optimizes anything.
 
 Science projects get three extra rules: reproducing the reference result is a guardrail from the start, confirmation uses parameter settings the experimenter never saw, and every hypothesis must name a mechanism.
+
+**When goals trade off.** Two goals that compete (recall against scan time, accuracy against latency) have three honest treatments, chosen at gate 1.
+Make one the goal and the other a guardrail with a tolerance, when only one really matters.
+Declare the exchange rate with `composition: oec` and weights, plus a guardrail floor, when you know it in advance.
+Run `composition: frontier` when you do not: the loop maps the trade-off as a set of non-dominated commits, each on its own branch, each confirmed against its parent by the same exact test, and hands you the mapped frontier with a preferred point (`sb frontier`, and the report's Frontier table).
+No ratchet is written. You pick the point (`docs/06-search.md` §6.9).
 
 **Several repos, one project.** One campaign per repo. The other repos are either instruments or services.
 A harness in a sibling repository goes in `external_instruments`: content-hashed at start, frozen for the campaign, a change halts the loop.

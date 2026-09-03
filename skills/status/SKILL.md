@@ -43,12 +43,14 @@ $SB status --json | grep -q '"campaign": null' || $SB next    # the cold-start b
 ```bash
 $SB status
 $SB status --json | grep -q '"campaign": null' || { $SB next; $SB budget; }
+$SB campaign show 2>/dev/null | grep -q '"composition": "frontier"' && $SB frontier   # frontier campaigns: the members and the preferred point
 ```
 
 With no campaign, `status` says how many cards and whether a profile exists; suggest
 `/strictlybetter` to start. Otherwise the three outputs are the answer: the status line
 (experiments, accepted, promoted, budget left, branch, head, wall, estimated dollars), the
 brief (frontier, accepted so far, dead ends, open experiments, operator mix), and the budget
-counters. Add at most two sentences of your own, none of them a number the engine did not
+counters. In a frontier campaign `sb frontier` is a fourth: the members with their confirm
+medians, `retired:<by>` marks, and `*` on the preferred point. Add at most two sentences of your own, none of them a number the engine did not
 print. A `halted` status gets its `halt_reason` repeated and the sentence
 *"`sb campaign resume` after review."*

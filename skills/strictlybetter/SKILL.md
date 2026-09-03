@@ -99,6 +99,11 @@ Build the **recommended set**:
 - **goals**: cards of kind `goal` whose `probe` is `True` and whose sigma is not `None`
   (or direction `equal`). If the user named an aim in the arguments, put the matching
   goal first. One or two goals; more dilutes the batch.
+- **composition**: `pareto` (the default) for one goal, or for goals that do not compete. When
+  two or more goals are proposed and they plausibly trade off (speed against cost, latency
+  against accuracy, recall against scan time), `frontier`: the campaign maps the trade-off as a
+  set of non-dominated branches and `sb/<id>` points at the preferred point (`docs/06` §6.9).
+  State the composition in the question whenever two or more goals are proposed.
 - **guardrails**: every card of kind `guardrail` that passed its probe. Hygiene guardrails
   are added by the engine whether or not you list them.
 - **diagnostics**: everything else that baselined (recorded, never decides).
@@ -108,8 +113,13 @@ Build the **recommended set**:
 
 Ask **one** `AskUserQuestion` with the recommended set as the first option, in this shape:
 
-> Start campaign `<id>`? Goals: `<g>` (sigma s, ~N s/run). Guardrails: `<…>`. Diagnostics: `<…>`. Budget: 30 experiments. Protected: `<paths>`. Frozen: `<paths>`. Branch `sb/<id>`.
+> Start campaign `<id>`? Goals: `<g>` (sigma s, ~N s/run). Guardrails: `<…>`. Diagnostics: `<…>`. Composition: `<pareto|frontier>` (with two or more goals). Budget: 30 experiments. Protected: `<paths>`. Frozen: `<paths>`. Branch `sb/<id>`.
 > Options: **Start with this set (recommended)** / **Edit goals or guardrails** / **Change budget or paths** / **Not now**.
+
+When two or more goals plausibly trade off, offer **Frontier (map the trade-off)** as the
+composition: it replaces **Change budget or paths** (the "Edit" answer covers those too), and
+choosing it sets `"composition": "frontier"`. When frontier is already the recommendation,
+the replacement option is **Pareto instead (no trades; every goal must hold)**.
 
 "Edit" and "Change" answers are the user's edits; apply them and start. No second question
 unless the edit names a card that does not exist. Then write the campaign file with the
@@ -122,14 +132,16 @@ Write tool (the inbox is the one writable place) and start:
 #  "plateau_patience": 8, "protected_paths": ["…"], "frozen_paths": [], "branch": "sb/2026-09-03-parse-perf",
 #  "max_parallel": 2, "distill_every": 8, "iteration_cap": 200, "notes": "<the user's aim, their words>",
 #  "archetype_priors": {"algorithmic": [3, 3], "config": [1, 3]}}      # optional: the pack's operator_priors
+# frontier campaigns: "composition": "frontier" (two or more goals), optional "preference": {"weights": {"recall": 3, "scan_seconds": 1}},
+#  "frontier_max": 8   (docs/02 §2.3; without weights sb/<id> stays at the base until a member improves every goal)
 $SB campaign start --file "$SB_REPO/.strictlybetter/inbox/campaign.json"
 $SB status
 ```
 
 `campaign start` freezes the set, hashes the frozen paths, creates the branch, and baselines
 any metric that lacks a baseline at this commit. It refuses when a goal has no valid
-baseline or no measured sigma; if it does, print its message and stop (the metrics skill
-demotes the offender). `archetype_priors` is the `operator_priors` object from
+baseline or no measured sigma, and refuses `composition: frontier` with fewer than two goals;
+if it does, print its message and stop (the metrics skill demotes the offender). `archetype_priors` is the `operator_priors` object from
 `$SB_ROOT/archetypes/<archetype-id>.json` when that file exists; leave it out otherwise.
 
 ## 5 · Running → one cycle

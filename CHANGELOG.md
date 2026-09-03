@@ -14,7 +14,7 @@
   catch everything without the judge held only for the six scripted tricks.
 
 Gates run for this release: <selftest N/N · unittest N · mutation N/N red · review K/K reports · fuzz 0/500 · numbers audit N numbers · gaming suite T/T caught, W/W walls load-bearing · live test · dogfood · user session verdict>
-Benchmark: see bench/results/<file>
+Benchmark (all on the 1.2.0 rule, one laptop, load 3–6 on 8 cores during the scripted and gaming runs): scripted `20260903-174724-scripted-pyfix.md`: walls accepted 6 of 45 experiments, false accepts 0/6 (0%), planted wins found 6/9 (67%), no-ops accepted 0/18 (0%), gaming accepted 0/18 (0%); naive accepted 4 of 43, false accepts 4/4 (100%), wins 0/8 (0%), no-ops 0/18 (0%), gaming 4/17 (24%). Gaming matrix `20260903-175547-gaming-pyfix.md`: all six tricks caught under all walls and under every single-wall removal (ten configurations incl. `no paired`); naive merged the benchmark edit. Power study `20260903-172325-power-noisefix.md` (noisefix, planted proportional wins, 8 seeds per cell, alpha 0.05 per test, Wilson 95% CIs in the file): walls accepted 0/8 (0%) at 0% (empirical false-accept rate),  at 3%, clean at 5%, clean at 10%, clean at 25%; naive accepted 5/8 (62%) at 0%,  at 3%,  at 5%,  at 10%,  at 25%. External-adversary gate `20260903-170034-adversary-pyfix.md`: 8 blind attacks, 0 accepted (validity 3, blind LLM judge 5).
 
 Until 1.1.2 the confirm level reused the screen heuristic (`Δ > κ_eff · σ · √(1/r + 1/k)`) on a
 candidate median of three repeats, adding repeats up to `max_repeats` when a round came back
@@ -58,6 +58,21 @@ the docs warned against. 1.2.0 replaces it with a test that states an error rate
 - Card fields `acceptance.min_effect_rel`, `fidelity.confirm.stages`; campaign fields `alpha`,
   `multiplicity`; ledger `confirm` events carry `tests.<metric>` (`p`, `alpha`, `n_pairs`, `exact`,
   `mean_diff`, `median_diff`) and the provenance block prints them.
+- **Frontier composition (Engine / Docs / Skills).** `"composition": "frontier"` for campaigns whose
+  goals trade off (speed against cost, latency against accuracy). The campaign keeps an archive of
+  non-dominated commits, one branch per member (`sb/<campaign>-f<k>`, `f0` the base), branches each
+  experiment from the member with the fewest attempts (ties to the largest NSGA-II crowding
+  distance; `sb prereg --parent` overrides), lets a goal regress at screen and at confirm when the
+  exact paired test against the parent member rejects on another goal and no guardrail breaks,
+  rejects a candidate that an existing member dominates on stored confirm medians
+  (`discard dominated:<member>`), retires the members a new one dominates, prunes to `frontier_max`
+  (8) by crowding distance, and points `sb/<campaign>` at the preferred member (`preference.weights`,
+  else the knee). No global ratchet is written; the frontier is the deliverable. New `sb frontier
+  [--json]`, a Frontier table in the report, brief fields `frontier_members`, `parent_member`,
+  `preferred_member`, and a selftest section on a planted speed-versus-quality trade-off.
+  `dominates`, `crowding_distances`, `frontier_pick_parent`, `frontier_preferred`, `accept_frontier`.
+  Docs: `docs/02` §2.3, `docs/06` §6.9, `docs/13` §13.7, `docs/03` §3.2; the gate-1 question offers
+  "Frontier (map the trade-off)" when two or more goals plausibly trade off.
 
 ### Versioning note
 The release protocol classifies a change to the acceptance rule or to any constant in the constants

@@ -1,0 +1,65 @@
+{
+  "id": "bench_checksum",
+  "title": "Benchmark output checksum",
+  "kind": "guardrail",
+  "direction": "equal",
+  "unit": "sha256[:16]",
+  "measure": {
+    "command": "python3 bench.py",
+    "parse": "metric-line:bench_checksum",
+    "cwd": ".",
+    "timeout_s": 300,
+    "env": {
+      "SB_BENCH_SIZE": "1500",
+      "SB_BENCH_REPEATS": "3"
+    },
+    "expected_duration_s": [
+      0.05,
+      120
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "env": {
+        "SB_BENCH_SIZE": "400",
+        "SB_BENCH_REPEATS": "3"
+      },
+      "repeats": 1
+    },
+    "confirm": {
+      "repeats": 12,
+      "max_repeats": 12,
+      "holdout": {
+        "kind": "env",
+        "var": "SB_SEED",
+        "values": [
+          1913,
+          8241,
+          6607
+        ]
+      }
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "bench.py",
+      "run_tests.py",
+      "tests/"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='noisylib/core.py'; s=open(p).read()\nanchor='    return acc\\n'\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns=''+s.replace(anchor,'    return acc ^ 1\\n',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "outputs could be hard-coded for the exact bench seed and size",
+    "work() could detect bench-shaped inputs and return a memoised answer",
+    "the checksum depends on SB_SEED and SB_BENCH_SIZE: compare only against a baseline measured with the same env"
+  ],
+  "contention_safe": false,
+  "noise": null,
+  "reuse_output": true
+}

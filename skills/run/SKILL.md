@@ -56,7 +56,8 @@ $SB campaign show | python3 -c 'import json,sys; c=json.load(sys.stdin); print("
 From the brief take: `status`, `batch_size`, `operator_mix` (a list of `[operator, count]`),
 `allowed_diff_sizes`, `frontier`, `goals`, `guardrails`, `recent_dead_ends`, `accepted_so_far`,
 `archive_hints`, `inheritance` (path or null), `frozen_paths`, `protected_paths`,
-`open_experiments`, `stop_requested`. Note `max_parallel` and `distill_every` from `campaign show`.
+`open_experiments`, `stop_requested`, `composition`, and in a frontier campaign `frontier_members`,
+`parent_member`, `preferred_member`. Note `max_parallel` and `distill_every` from `campaign show`.
 
 - `status` is not `running` → print the brief's `halt_reason` and stop.
 - `stop_requested` true or `batch_size` 0 → skip to (f).
@@ -65,6 +66,10 @@ From the brief take: `status`, `batch_size`, `operator_mix` (a list of `[operato
   uncommitted work, run (d) from `submit`; has `judge_stat` but no `confirm`: continue from
   the judge; has `confirm`: accept or discard). Finish them before pre-registering new ones.
 - Read the inheritance body if present (`Read` the path) and the last few dead ends.
+- `composition` is `frontier` → `frontier_members` lists the active members (id, commit, attempts,
+  confirm medians per goal), `parent_member` is the member the next `prereg` will branch from,
+  and `preferred_member` is the one `sb/<campaign>` points at. Pass nothing extra anywhere:
+  `prereg` picks the parent. Quote all three in (g).
 
 ## (b) Hypothesize: write `batch_size` files
 
@@ -96,7 +101,9 @@ $SB prereg --file "$H"            # → {"id": "e0007", "worktree": "...", "base
 ```
 
 `prereg` writes the ledger line before any diff exists, creates the worktree from the
-campaign head, and charges the budget. If it errors (STOP file, budget exhausted, unknown
+campaign head, and charges the budget. In a frontier campaign the worktree is rooted at the
+parent member the engine picked and the output carries `parent_member`; never pass `--parent`,
+that flag is the human's override. If it errors (STOP file, budget exhausted, unknown
 operator, a predicted metric not in the campaign) print the message; fix the hypothesis file
 only for the last two causes and retry once; otherwise skip to (f).
 
@@ -125,6 +132,8 @@ Work through this list for each id; stop at the first branch that ends it.
    [ "$B" = "$H" ] || echo "STALE <id>"
    ```
    `STALE` → `$SB discard <id> --reason manual:stale-head --archive` (the diff is archived; re-propose it on the new head next cycle if it still applies). Done.
+   Frontier campaigns: skip this step. Each worktree is rooted at its parent member's commit, which
+   never moves, and `accept` verifies the descent itself.
 4. **Screen** → `$SB measure <id> --fidelity screen` then `$SB judge <id>`. Read `"verdict"` from the judge's first line:
    - `retry-screen` → run `$SB measure <id> --fidelity screen` and `$SB judge <id>` once more, then continue with the new verdict.
    - `discard` → `$SB discard <id> --reason <reason> --archive` when the judge's `"improved"` list is non-empty or any goal comparison line shows a positive `delta`; without `--archive` otherwise. `<reason>` is the judge's `"reason"` when its prefix (before `:`) is one of `noise|regression|invalid`; else `noise`. Done.
@@ -136,6 +145,7 @@ Work through this list for each id; stop at the first branch that ends it.
 6. **Confirm** → `$SB confirm <id>`. Read `"verdict"` from its first line.
 7. **Cost** (before the final verb, so the bandit sees it) → `$SB cost <id> --wall-s <experimenter seconds> --tier <low|medium|high>`. Tokens are unknown on this platform; the dollars column is an estimate from zero tokens, and the cycle summary says "estimated".
 8. **Final verb** → confirm `accept` → `$SB accept <id>` (fast-forwards the campaign branch, ratchets the baseline). If `accept` reports "not a fast-forward", treat as STALE in step 3. Confirm `discard` → `$SB discard <id> --reason <reason> --archive` with `<reason>` the confirm line's `"reason"` when its prefix is in the fixed vocabulary, else `noise`.
+   In a frontier campaign `accept` adds a member instead of fast-forwarding; its output has `member`, `parent_member`, `retired`, `preferred_member`. Quote them in (g). A confirm reason `dominated:<member>` is not in the discard vocabulary: discard with `--reason noise --archive` (the ledger's `confirm` event keeps the dominated reason).
 
 Judge payload (step 5): the engine composes it, so no transcript text can leak into it:
 
@@ -164,11 +174,12 @@ $SB distill-stats --json | tee "$SB_REPO/.strictlybetter/inbox/stats.json" | pyt
   then `$SB inheritance write --file "$SB_REPO/.strictlybetter/inbox/inheritance.md"`.
 - `explore:levelN` → nothing extra; the next brief widens `allowed_diff_sizes` and the mix.
 
-## (g) Cycle summary (three lines, quoted numbers)
+## (g) Cycle summary (three lines, four in a frontier campaign, quoted numbers)
 
 ```
 cycle: <n> pre-registered, <k> accepted (<ids>), <m> discarded (<id: reason>, …), <b> blocked
 frontier: <goal> best=<value> sigma=<sigma>  (from `$SB next`)
+frontier members: <n> active (<ids>) · preferred <id> · next parent <id>  (frontier campaigns only, from `$SB next`)
 next: <decision from distill-stats> · budget left <…> · wall <…>s · dollars estimated $<…>
 ```
 

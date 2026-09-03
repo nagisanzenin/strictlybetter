@@ -1,5 +1,5 @@
 {
-  "_comment": "docs/02 §2.3 in JSON. status: proposed | running | halted | ended. composition: pareto | oec (oec requires oec_weights: {metric_id: weight}). mode: optimize | instrument (instrument inverts frozen and protected roles per docs/07 §7.3). walls are the five walls of docs/04 plus the pre-registration, anomaly-breaker, and paired-confirmation checks; every one defaults to true and turning one off is recorded in the ledger and the report. Placeholders in {{...}} are filled at gate 1; the harness rejects a campaign that still contains one.",
+  "_comment": "docs/02 §2.3 in JSON. status: proposed | running | halted | ended. composition: pareto | oec | frontier (oec requires oec_weights: {metric_id: weight}; frontier needs two or more goals that trade off and keeps an archive of non-dominated members, one branch each, instead of one line of commits: docs/02 §2.3, docs/06 §6.9). mode: optimize | instrument (instrument inverts frozen and protected roles per docs/07 §7.3). walls are the five walls of docs/04 plus the pre-registration, anomaly-breaker, and paired-confirmation checks; every one defaults to true and turning one off is recorded in the ledger and the report. Placeholders in {{...}} are filled at gate 1; the harness rejects a campaign that still contains one.",
   "schema_version": 1,
   "id": "{{campaign_id}}",
   "created_at": "{{iso_timestamp}}",
@@ -10,6 +10,10 @@
   "inherited_ratchet": [],
   "composition": "pareto",
   "oec_weights": null,
+  "preference": null,
+  "_comment_preference": "frontier only. null, or {\"weights\": {metric_id: weight}}. With weights, sb/<id> points at the member with the largest weighted sum of normalized gains over the base f0; with null it points at the knee, the member whose smallest normalized gain over the base is largest, which is f0 itself until some member improves every goal. A decision aid for gate 2, not a claim (docs/13 §13.7).",
+  "frontier_max": 8,
+  "_comment_frontier_max": "frontier only. Most active members kept. Above it the member with the smallest NSGA-II crowding distance retires (retired_by: crowding); a member that is the extreme on some goal is pruned last. Every member keeps its branch sb/<id>-f<k>.",
   "budget": {"dollars": 40, "hours": 8, "experiments": 60},
   "plateau_patience": 8,
   "protected_paths": ["{{protected_path}}"],

@@ -1,0 +1,49 @@
+{
+  "id": "tests_failed",
+  "title": "Failing unit tests",
+  "kind": "guardrail",
+  "direction": "minimize",
+  "unit": "count",
+  "measure": {
+    "command": "python3 run_tests.py",
+    "parse": "metric-line:tests_failed",
+    "cwd": ".",
+    "timeout_s": 120,
+    "env": {},
+    "expected_duration_s": [
+      0.02,
+      60
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "repeats": 1
+    },
+    "confirm": {
+      "repeats": 1,
+      "max_repeats": 1,
+      "holdout": null
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "bench.py",
+      "run_tests.py",
+      "tests/"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='noisylib/core.py'; s=open(p).read()\nanchor='    return acc\\n'\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns=''+s.replace(anchor,'    return acc + 1\\n',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "tests could be deleted or skipped (frozen paths guard tests/ and run_tests.py)",
+    "a broad try/except in noisylib could hide errors the suite would otherwise raise",
+    "noisylib could monkeypatch unittest or call sys.exit during import"
+  ],
+  "contention_safe": true,
+  "noise": null
+}

@@ -1,0 +1,64 @@
+{
+  "id": "bench_ms",
+  "title": "Benchmark work() (ms, median of repeats)",
+  "kind": "goal",
+  "direction": "minimize",
+  "unit": "ms",
+  "measure": {
+    "command": "python3 bench.py",
+    "parse": "metric-line:bench_ms",
+    "cwd": ".",
+    "timeout_s": 300,
+    "env": {
+      "SB_BENCH_SIZE": "1500",
+      "SB_BENCH_REPEATS": "3"
+    },
+    "expected_duration_s": [
+      0.05,
+      120
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "env": {
+        "SB_BENCH_SIZE": "400",
+        "SB_BENCH_REPEATS": "3"
+      },
+      "repeats": 2
+    },
+    "confirm": {
+      "repeats": 12,
+      "max_repeats": 12,
+      "holdout": {
+        "kind": "env",
+        "var": "SB_SEED",
+        "values": [
+          1913,
+          8241,
+          6607
+        ]
+      }
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 1.0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "bench.py",
+      "run_tests.py",
+      "tests/"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='noisylib/core.py'; s=open(p).read()\nanchor='def work(items):'\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns='import time as _t\\n'+s.replace(anchor,'def work(items):\\n    _t.sleep(0.05)',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "WORK_UNITS could be set to 0 (the fold never runs; tests/ catches the constant output)",
+    "work() could special-case the benchmark sizes (400 at screen, 1500 at confirm)",
+    "bench inputs could be cached by seed"
+  ],
+  "contention_safe": false,
+  "noise": null
+}

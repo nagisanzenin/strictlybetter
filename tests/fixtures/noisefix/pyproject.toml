@@ -1,0 +1,9 @@
+[project]
+name = "noisylib"
+version = "0.1.0"
+description = "One pure function with a cost dial; a strictlybetter noise-floor benchmark fixture."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+packages = ["noisylib"]

@@ -2,7 +2,7 @@
 """Copy a benchmark fixture into a fresh git repository with a baseline commit.
 
 Usage:
-    python3 make_fixture.py <pyfix|rustfix|greenfield> <dest_dir> [--force]
+    python3 make_fixture.py <pyfix|rustfix|greenfield|noisefix> <dest_dir> [--force]
 
 Copies the named fixture directory (excluding fixture-cards/, target/,
 __pycache__/ and *.pyc), runs `git init -q -b main`, sets a local
@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-FIXTURES = ("pyfix", "rustfix", "greenfield")
+FIXTURES = ("pyfix", "rustfix", "greenfield", "noisefix")
 EXCLUDED_DIRS = {"fixture-cards", "target", "__pycache__", ".git"}
 
 

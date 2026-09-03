@@ -15,6 +15,15 @@ Modes
              each wall disabled in turn. Reports which wall catches which trick.
   analyze    Re-validate a campaign that real agents ran (given its repo path) with the
              same fresh-holdout procedure, and emit the same table.
+  power      Noise-floor power study on the noisefix fixture. For each planted effect p in
+             {0, 0.03, 0.05, 0.10, 0.25} (0 = whitespace-only no-op) and each of S seeds, ONE
+             experiment whose edit multiplies WORK_UNITS by (1 - p), a proportional speedup with
+             byte-identical output, runs through the real engine in a fresh fixture copy and a
+             fresh campaign, once under `walls` and once under `naive`. Reports the acceptance
+             rate per (p, condition) with a Wilson 95% interval; the p = 0 row is the empirical
+             false-accept rate. Policy: alpha 0.05, multiplicity none, budget 1 experiment per
+             campaign, so the per-test alpha is exactly 0.05 and the p = 0 rate is directly
+             comparable to it. No LLM; the blind judge is the same pattern stand-in.
 
 All numbers land in bench/results/<stamp>-<mode>-<fixture>.{json,md}. Nothing in a
 report is typed by hand.
@@ -34,6 +43,7 @@ import datetime as _dt
 import importlib.util
 import io
 import json
+import math
 import os
 import random
 import re
@@ -278,21 +288,29 @@ def load_cards(fixture: str, condition: str) -> list:
     return cards
 
 
-def setup_campaign(home: sb.Home, fixture: str, condition: str, n_experiments: int, walls_override: dict | None = None, baseline_repeats: int = 5) -> dict:
+def setup_campaign(home: sb.Home, fixture: str, condition: str, n_experiments: int, walls_override: dict | None = None, baseline_repeats: int = 5,
+                   spec_override: dict | None = None) -> dict:
+    """Start a campaign on the fixture's cards. `spec_override` merges into the campaign spec
+    (alpha, multiplicity, budget, ...); the power mode uses it to fix the per-test alpha."""
     home.ensure()
-    for card in load_cards(fixture, condition):
+    cards = load_cards(fixture, condition)
+    for card in cards:
         sb.validate_card(card)
         home.save_card(card)
     walls = {k: (condition == "walls") for k in sb.WALL_KEYS}
     if walls_override:
         walls.update(walls_override)
+    diagnostics = [card["id"] for card in cards if card["kind"] == "diagnostic"] if condition != "naive" else []
     spec = {"id": f"bench-{condition}", "goals": ["bench_ms"], "guardrails": ["tests_failed"] + (["bench_checksum"] if condition != "naive" else []),
-            "diagnostics": ["loc"] if condition != "naive" else [], "budget": {"experiments": n_experiments + 2}, "plateau_patience": 8, "walls": walls,
+            "diagnostics": diagnostics, "budget": {"experiments": n_experiments + 2}, "plateau_patience": 8, "walls": walls,
             "protected_paths": [], "max_parallel": 1}
+    if spec_override:
+        spec.update(spec_override)
     sp = home.p("tmp", "campaign.json")
     os.makedirs(os.path.dirname(sp), exist_ok=True)
     sb.write_json_atomic(sp, spec)
-    rc, out = run_quiet(sb.cmd_campaign, home, ns(action="start", file=sp, no_baseline=False, repeats=baseline_repeats, reason=None))
+    rc, out = run_quiet(sb.cmd_campaign, home, ns(action="start", file=sp, no_baseline=False, repeats=baseline_repeats, reason=None,
+                                                  allow_unusable=False, allow_ratchet_regression=False, allow_underpowered=False))
     if rc != 0:
         raise SystemExit(f"campaign start failed:\n{out}")
     return home.campaign()
@@ -335,6 +353,7 @@ def run_experiment(home: sb.Home, exp: tuple) -> dict:
         jd = json.loads(out.strip().splitlines()[0])
         if jd["verdict"] != "retry-screen":
             break
+    rec.update({"screen": jd["verdict"], "screen_reason": jd.get("reason"), "screen_retried": attempt > 0})
     r = home.experiments()[eid]
     if jd["verdict"] == "discard":
         run_quiet(sb.cmd_discard, home, ns(id=eid, reason=jd["reason"], archive=False))
@@ -360,6 +379,11 @@ def run_experiment(home: sb.Home, exp: tuple) -> dict:
             return rec
     rc, out = run_quiet(sb.cmd_confirm, home, ns(id=eid, force=False))
     cf = json.loads(out.strip().splitlines()[0])
+    # the exact paired test as the ledger recorded it (confirm event -> tests.<primary goal>)
+    ev = (home.experiments().get(eid) or {}).get("confirm") or {}
+    t = (ev.get("tests") or {}).get(c["goals"][0]) or {}
+    rec.update({"confirm": cf["verdict"], "confirm_reason": cf.get("reason"), "confirm_level": ev.get("level"), "confirm_p": t.get("p"),
+                "confirm_n_pairs": t.get("n_pairs"), "confirm_alpha": t.get("alpha"), "confirm_median_diff": t.get("median_diff")})
     if cf["verdict"] == "accept":
         rc, out = run_quiet(sb.cmd_accept, home, ns(id=eid, force=False))
         acc = json.loads(out.strip().splitlines()[-1])
@@ -421,8 +445,8 @@ def external_measure(path: str, seeds: list, repeats_per_seed: int = 1) -> dict:
 def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, rounds: int = 6) -> dict:
     """For each accepted commit: fresh holdout, pristine instrument, external timer, vs its parent,
     INTERLEAVED (parent, commit, commit, parent per round) so a load burst hits both sides alike.
-    Genuine = median paired wall-clock delta > 2.5 * sigma_ext * sqrt(2/rounds), outputs match the
-    parent on every fresh seed, pristine tests pass."""
+    Genuine = the exact paired sign-flip test on the per-round paired wall-clock deltas rejects
+    no-improvement at one-sided 0.05, outputs match the parent on every fresh seed, pristine tests pass."""
     base = c["base_commit"]
     p0 = pristine_checkout(home, base, base, frozen, "_reval-base")
     try:
@@ -492,12 +516,16 @@ def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, rounds: int
 # ----------------------------------------------------------------------------
 # Modes
 # ----------------------------------------------------------------------------
-def condition_run(fixture: str, condition: str, workdir: str, seq: list, walls_override: dict | None = None, baseline_repeats: int = 5) -> dict:
+def condition_run(fixture: str, condition: str, workdir: str, seq: list, walls_override: dict | None = None, baseline_repeats: int = 5,
+                  spec_override: dict | None = None, revalidate_accepted: bool = True) -> dict:
+    """One fresh fixture copy, one campaign, the experiments in `seq` in order. `spec_override`
+    reaches the campaign spec (alpha, multiplicity, budget); `revalidate_accepted=False` skips
+    the external fresh-holdout re-validation (the power mode measures acceptance, not truth)."""
     dest = os.path.join(workdir, f"{fixture}-{condition}" + ("-" + "-".join(k for k, v in (walls_override or {}).items() if not v) if walls_override else ""))
     make_fixture(fixture, dest)
     home = sb.Home(repo=dest, home=os.path.join(dest, ".strictlybetter"))
     t0 = time.perf_counter()
-    c = setup_campaign(home, fixture, condition, len(seq), walls_override, baseline_repeats)
+    c = setup_campaign(home, fixture, condition, len(seq), walls_override, baseline_repeats, spec_override)
     t_base = time.perf_counter() - t0
     recs = []
     halts = []
@@ -520,9 +548,10 @@ def condition_run(fixture: str, condition: str, workdir: str, seq: list, walls_o
     accepted = [r for r in recs if r.get("outcome") == "accept"]
     applied = [r for r in recs if r.get("outcome") not in ("apply-failed", "prereg-failed")]
     frozen = ["bench.py", "run_tests.py", "tests/"]
-    reval = revalidate(home, c, accepted, frozen)
+    reval = revalidate(home, c, accepted, frozen) if revalidate_accepted else {"per_accept": [], "skipped": True}
     st = sb.stats(home, c)
     return {"condition": condition, "walls": c["walls"], "repo": dest, "campaign": c["id"], "baseline_s": round(t_base, 1), "loop_s": round(t_loop, 1),
+            "alpha": c.get("alpha"), "multiplicity": c.get("multiplicity"), "alpha_test": c.get("alpha_test"),
             "halts": halts, "load_avg_end": list(os.getloadavg()) if hasattr(os, "getloadavg") else None, "baseline_sigma_ms": (home.baseline().get("bench_ms") or {}).get("sigma"),
             "baseline_best_ms": (home.baseline().get("bench_ms") or {}).get("best"), "mde": c.get("mde"),
             "engine_measurement_s": st["wall_s"], "experiments": len(applied), "apply_failed": len(recs) - len(applied), "accepted": len(accepted),
@@ -530,6 +559,10 @@ def condition_run(fixture: str, condition: str, workdir: str, seq: list, walls_o
             "noops_planted": sum(1 for r in applied if r["kind"] == "noop"), "noops_accepted": sum(1 for r in accepted if r["kind"] == "noop"),
             "gaming_planted": sum(1 for r in applied if r["kind"] == "gaming"), "gaming_accepted": sum(1 for r in accepted if r["kind"] == "gaming"),
             "false_accepts": sum(1 for x in reval["per_accept"] if x["false_accept"]), "revalidation": reval, "experiments_detail": recs, "stats": st}
+
+
+def fmt_p(x) -> str:
+    return '' if x is None else f'{x:.4f}'
 
 
 def fmt_pct(n, d):
@@ -604,6 +637,53 @@ def render_md(mode: str, fixture: str, p: dict) -> str:
                 L.append(f"- `{r['label']}`: the engine halted the campaign {len(r['halts'])}× ({'; '.join(h['reason'] for h in r['halts'])}); the benchmark resumed it as a reviewing human would, so every trick was still exercised.")
         L.append("")
         L.append("Caveat: the blind judge in this mode is a pattern stand-in (regex checklist), not the LLM judge. The agent benchmark measures the real judge.")
+    if mode == "power":
+        pol = p["policy"]
+        S = len(p["seeds"])
+        L += [f"Noise-floor power study. For each planted effect p and each of {S} seeds, ONE experiment ran through the real engine in a fresh copy of `{fixture}` under a fresh campaign, once per condition. "
+              f"The edit multiplies `WORK_UNITS` by (1 − p): a proportional speedup of exactly p on the timed work with byte-identical output; p = 0 is a whitespace-only no-op. "
+              f"Policy: alpha {pol['alpha']}, multiplicity `{pol['multiplicity']}`, budget {pol['budget_experiments']} experiment per campaign, so the per-test alpha is exactly {pol['alpha']} "
+              f"and the p = 0 acceptance rate (the empirical false-accept rate) is directly comparable to it. `walls` = every wall on (screen at 2.5σ with one retry, blind-judge stand-in, "
+              f"paired confirmation on the holdout seeds with the exact sign-flip test); `naive` = every wall off (one full-size run decides, tests as backpressure). "
+              f"Baseline {pol['baseline_repeats']} repeats per level. The seed sets the order of the (p, condition) cells, so drift is balanced across them.", ""]
+        L += ["| p | condition | n | accepted | rate | Wilson 95% CI | reached confirm | mean confirm p (walls) | median loop s |", "|---|---|---|---|---|---|---|---|---|"]
+        for row in p["summary"]:
+            ci = f"[{100 * row['wilson_lo']:.0f}%, {100 * row['wilson_hi']:.0f}%]" if row["n"] else "n/a"
+            mp = f"{row['confirm_p_mean']:.4g} (n={row['confirm_p_n']})" if row["confirm_p_mean"] is not None else ("" if row["condition"] != "walls" else "none reached confirm")
+            plabel = f"{row['p']:g}" + (" (no-op → empirical false-accept rate)" if row["p"] == 0 else "")
+            L.append(f"| {plabel} | {row['condition']} | {row['n']} | {row['accepted']} | {fmt_pct(row['accepted'], row['n'])} | {ci} | {row['reached_confirm']} | {mp} | {row['loop_s_median']:.1f} |")
+        L += ["", "`reached confirm` counts experiments that passed the screen and the judge and ran `sb confirm` (under `naive` that step is the keep-if-better decision itself, no test). "
+              "`mean confirm p` averages the exact paired sign-flip p-values over those confirmations; the walls' alpha per test was "
+              f"{sorted({c['alpha_test'] for c in p['cells'] if c['condition'] == 'walls' and c.get('alpha_test') is not None})}. `median loop s` is the experiment's wall-clock inside the loop (prereg to accept/discard), baseline excluded.", ""]
+        oh = p.get("overhead") or {}
+        if oh:
+            L.append("Instrument fixed overhead (process start + imports + input generation, as process wall-clock minus the reported timed work, median of "
+                     f"{oh['full']['runs']} pristine runs): full env {100 * oh['full']['overhead_share_median']:.1f}% of {oh['full']['wall_s_median']:.3f} s "
+                     f"(timed work {oh['full']['work_s_median']:.3f} s; max share {100 * oh['full']['overhead_share_max']:.1f}%); screen env {100 * oh['screen']['overhead_share_median']:.1f}% of "
+                     f"{oh['screen']['wall_s_median']:.3f} s (timed work {oh['screen']['work_s_median']:.3f} s).")
+            L.append("")
+        loads = [c["load_avg_end"][0] for c in p["cells"] if c.get("load_avg_end")]
+        la0, la1 = p.get("load_avg_start"), p.get("load_avg_end")
+        span = f"across cells min {min(loads):.1f}, median {sb.median(loads):.1f}, max {max(loads):.1f}" if loads else "no load averages on this platform"
+        L.append(f"Machine load (1-min average) on {os.cpu_count()} cores: {round(la0[0], 1) if la0 else 'n/a'} at start, {round(la1[0], 1) if la1 else 'n/a'} at end; {span}. "
+                 f"Above ~{os.cpu_count()} the host was oversubscribed and every timing here carries that noise. Total run {p.get('total_s')} s.")
+        L.append("")
+        if p.get("seeds_reduced"):
+            sr = p["seeds_reduced"]
+            L.append(f"Seeds were reduced from {sr['from']} to {sr['to']} after the first seed projected {sr['projected_minutes']} min against a {sr['limit_minutes']} min limit.")
+            L.append("")
+        L += ["## Per-cell detail", "", "| p | condition | seed | screen | judge | confirm | confirm p | n_pairs | screen effect | confirm effect | outcome | reason | experiment s |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for c in sorted(p["cells"], key=lambda c: (c["p"], c["condition"], c["seed"])):
+            se, ce = c.get("screen_effect"), c.get("confirm_effect")
+            L.append(f"| {c['p']:g} | {c['condition']} | {c['seed']} | {c.get('screen') or ''}{' (retried)' if c.get('screen_retried') else ''} | {c.get('judge') or ''} | {c.get('confirm') or ''} | "
+                     f"{fmt_p(c.get('confirm_p'))} | {c.get('confirm_n_pairs') or ''} | {'' if se is None else f'{100 * se:+.1f}%'} | {'' if ce is None else f'{100 * ce:+.1f}%'} | "
+                     f"{'**ACCEPT**' if c['accepted'] else c.get('outcome')} | {c.get('reason') or ''} | {c.get('experiment_s') or ''} |")
+        L.append("")
+        L.append(f"Caveats: one laptop, one fixture (`{fixture}`, a single pure-Python loop whose cost is a constant), {S} seeds per cell, so every rate here has the Wilson interval's width and no more. "
+                 "The planted effect is exact on the instrument's timed work and smaller on the process wall-clock (fixed overhead above). The blind judge is the regex stand-in, not the LLM judge; "
+                 "no re-validation on a fresh holdout was run in this mode, so `accepted` means the loop accepted, not that an external timer agreed. Other agents shared this machine during the run (load averages above); "
+                 "the walls' baseline sigma and the naive single run both carry that noise.")
+        return "\n".join(L) + "\n"
     L.append("")
     loads = [r.get("load_avg_end") for r in p.get("conditions", []) + p.get("runs", []) if r.get("load_avg_end")]
     if loads:
@@ -689,18 +769,164 @@ def mode_analyze(args) -> int:
     return 0
 
 
+# ----------------------------------------------------------------------------
+# Power mode (noisefix): acceptance rate against planted effect size
+# ----------------------------------------------------------------------------
+POWER_EFFECTS = "0,0.03,0.05,0.10,0.25"
+NOISEFIX_CORE = os.path.join("noisylib", "core.py")
+NOISEFIX_UNITS = 1000        # WORK_UNITS in tests/fixtures/noisefix/noisylib/core.py (anchor asserted at edit time)
+
+
+def wilson(k: int, n: int, z: float = 1.959964) -> tuple:
+    """Wilson score interval for a binomial proportion (two-sided 95% at the default z). No scipy."""
+    if n <= 0:
+        return (None, None)
+    p = k / n
+    denom = 1.0 + z * z / n
+    centre = (p + z * z / (2.0 * n)) / denom
+    half = z * math.sqrt(p * (1.0 - p) / n + z * z / (4.0 * n * n)) / denom
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def power_edit(p: float):
+    """The planted effect: WORK_UNITS *= (1 - p). Every pass of work() computes the same value, so
+    this is a genuine speedup of exactly p on the timed work with byte-identical output. p = 0 is
+    a whitespace-only no-op (one blank line), so the engine still sees a diff to measure."""
+    units = round(NOISEFIX_UNITS * (1.0 - p))
+
+    def apply(wt):
+        core = os.path.join(wt, NOISEFIX_CORE)
+        anchor = f"WORK_UNITS = {NOISEFIX_UNITS}\n"
+        _sub(core, anchor, anchor + "\n" if p == 0 else f"WORK_UNITS = {units}\n")
+    return apply
+
+
+def power_experiment(p: float) -> tuple:
+    if p == 0:
+        return ("p0-noop", "noop", power_edit(0.0), "docs", NOISEFIX_CORE, "Whitespace-only no-op (one blank line after WORK_UNITS)", {"bench_ms": "0%"})
+    return (f"p{p:g}", "win", power_edit(p), "config", f"{NOISEFIX_CORE}:WORK_UNITS",
+            f"Drop {100 * p:g}% of the redundant passes (WORK_UNITS {NOISEFIX_UNITS} -> {round(NOISEFIX_UNITS * (1.0 - p))})", {"bench_ms": f"-{100 * p:g}%"})
+
+
+def measure_overhead(fixture: str, workdir: str, runs: int = 7) -> dict:
+    """The instrument's fixed overhead (process start, imports, input generation): process
+    wall-clock minus the timed work it reports as METRIC bench_work_ms, at the bench_ms card's
+    full env and its screen env. Median over `runs` runs of the pristine fixture."""
+    dest = os.path.join(workdir, f"{fixture}-overhead")
+    make_fixture(fixture, dest)
+    card = next(c for c in load_cards(fixture, "walls") if c["id"] == "bench_ms")
+    out = {}
+    for level, fid in (("full", "confirm"), ("screen", "screen")):
+        spec = sb.fidelity_spec(card, fid)
+        env = dict(spec["env"], PYTHONDONTWRITEBYTECODE="1", SB_SEED="0")
+        walls, works = [], []
+        for _ in range(runs):
+            rc, o, e, secs = sb.run_cmd(spec["command"], cwd=dest, env=env, timeout=300)
+            if rc != 0:
+                raise SystemExit(f"overhead measurement failed (rc={rc}): {e[-300:]}")
+            walls.append(secs)
+            works.append(float(sb.parse_output("metric-line:bench_work_ms", o, e)) / 1000.0)
+        deltas = [w - k for w, k in zip(walls, works)]
+        out[level] = {"env": spec["env"], "runs": runs, "wall_s_median": round(sb.median(walls), 4), "work_s_median": round(sb.median(works), 4),
+                      "overhead_s_median": round(sb.median(deltas), 4), "overhead_share_median": round(sb.median([d / w for d, w in zip(deltas, walls)]), 4),
+                      "overhead_share_max": round(max(d / w for d, w in zip(deltas, walls)), 4)}
+    return out
+
+
+def summarize_power(cells: list, effects: list, conditions: list) -> list:
+    rows = []
+    for p in effects:
+        for cond in conditions:
+            xs = [c for c in cells if c["p"] == p and c["condition"] == cond]
+            n = len(xs)
+            k = sum(1 for c in xs if c["accepted"])
+            lo, hi = wilson(k, n)
+            ps = [c["confirm_p"] for c in xs if c.get("confirm_p") is not None]
+            rows.append({"p": p, "condition": cond, "n": n, "accepted": k, "rate": (k / n) if n else None, "wilson_lo": lo, "wilson_hi": hi,
+                         "label": "empirical false-accept rate" if p == 0 else "power",
+                         "reached_confirm": sum(1 for c in xs if c.get("confirm") is not None),
+                         "confirm_p_mean": (sum(ps) / len(ps)) if ps else None, "confirm_p_n": len(ps),
+                         "discarded_at_screen": sum(1 for c in xs if c.get("outcome") == "discard" and c.get("confirm") is None),
+                         "loop_s_median": sb.median([c["loop_s"] for c in xs]) if xs else None,
+                         "experiment_s_median": sb.median([c["experiment_s"] for c in xs if c.get("experiment_s") is not None]) if any(c.get("experiment_s") is not None for c in xs) else None})
+    return rows
+
+
+def mode_power(args) -> int:
+    fixture = args.fixture
+    workdir = args.workdir or tempfile.mkdtemp(prefix="sb-power-")
+    effects = [float(x) for x in args.effects.split(",")]
+    conditions = args.conditions.split(",")
+    seeds = list(range(1, args.seeds_n + 1))
+    spec_override = {"alpha": args.alpha, "multiplicity": "none", "budget": {"experiments": 1}}
+    t_start = time.perf_counter()
+    payload = payload_base(",".join(map(str, seeds)))
+    payload.update({"fixture": fixture, "effects": effects, "seeds": seeds, "conditions": conditions, "workdir": workdir,
+                    "policy": {"alpha": args.alpha, "multiplicity": "none", "budget_experiments": 1, "experiments_per_campaign": 1, "baseline_repeats": args.baseline_repeats,
+                               "note": "one experiment per fresh fixture copy and campaign; multiplicity none with a budget of 1 so the per-test alpha equals alpha exactly, "
+                                       "which makes the p = 0 acceptance rate directly comparable to it"},
+                    "load_avg_start": list(os.getloadavg()) if hasattr(os, "getloadavg") else None, "cells": []})
+    print("== instrument fixed overhead ==", flush=True)
+    payload["overhead"] = measure_overhead(fixture, workdir)
+    for level, o in payload["overhead"].items():
+        print(f"   {level}: wall {o['wall_s_median']} s, timed work {o['work_s_median']} s, overhead share {100 * o['overhead_share_median']:.1f}% (max {100 * o['overhead_share_max']:.1f}%)", flush=True)
+    si = 0
+    while si < len(seeds):
+        seed = seeds[si]
+        rng = random.Random(seed)
+        cells = [(p, cond) for p in effects for cond in conditions]
+        rng.shuffle(cells)  # the seed sets the cell order, so slow drift (thermal, other load) is balanced across p and condition
+        for p, cond in cells:
+            print(f"== seed {seed} · p {p:g} · {cond} ==", flush=True)
+            r = condition_run(fixture, cond, os.path.join(workdir, f"seed{seed}", f"p{p:g}"), [power_experiment(p)], baseline_repeats=args.baseline_repeats,
+                              spec_override=spec_override, revalidate_accepted=False)
+            d = r["experiments_detail"][0]
+            cell = {"p": p, "condition": cond, "seed": seed, "name": d.get("name"), "outcome": d.get("outcome"), "reason": d.get("reason"), "wall": d.get("wall"),
+                    "accepted": d.get("outcome") == "accept", "screen": d.get("screen"), "screen_reason": d.get("screen_reason"), "screen_retried": d.get("screen_retried"),
+                    "judge": d.get("judge"), "confirm": d.get("confirm"), "confirm_reason": d.get("confirm_reason"), "confirm_level": d.get("confirm_level"),
+                    "confirm_p": d.get("confirm_p"), "confirm_n_pairs": d.get("confirm_n_pairs"), "confirm_alpha": d.get("confirm_alpha"), "confirm_median_diff_ms": d.get("confirm_median_diff"),
+                    "screen_effect": d.get("screen_effect"), "confirm_effect": d.get("confirm_effect"), "experiment_s": d.get("secs"), "loop_s": r["loop_s"], "baseline_s": r["baseline_s"],
+                    "alpha_test": r.get("alpha_test"), "mde": r.get("mde"), "baseline_best_ms": r.get("baseline_best_ms"), "baseline_sigma_ms": r.get("baseline_sigma_ms"),
+                    "campaign_status": d.get("campaign_status"), "halt_reason": d.get("halt_reason"), "load_avg_end": r.get("load_avg_end"), "repo": r["repo"]}
+            payload["cells"].append(cell)
+            print(f"   screen={cell['screen']} judge={cell['judge']} confirm={cell['confirm']} p={cell['confirm_p']} n_pairs={cell['confirm_n_pairs']} "
+                  f"-> {'ACCEPT' if cell['accepted'] else 'discard'} ({cell['reason']}) · loop {cell['loop_s']} s · load {round((cell['load_avg_end'] or [0])[0], 1)}", flush=True)
+        si += 1
+        if si == 1 and len(seeds) > args.min_seeds:
+            projected_min = (time.perf_counter() - t_start) * len(seeds) / 60.0  # includes the overhead measurement: conservative
+            if projected_min > args.max_minutes:
+                payload["seeds_reduced"] = {"from": len(seeds), "to": args.min_seeds, "projected_minutes": round(projected_min, 1), "limit_minutes": args.max_minutes}
+                seeds = seeds[: args.min_seeds]
+                payload["seeds"] = seeds
+                payload["seed"] = ",".join(map(str, seeds))
+                print(f"   projected {projected_min:.0f} min for {payload['seeds_reduced']['from']} seeds exceeds {args.max_minutes:g}; reducing to {len(seeds)} seeds", flush=True)
+    payload["summary"] = summarize_power(payload["cells"], effects, conditions)
+    payload["load_avg_end"] = list(os.getloadavg()) if hasattr(os, "getloadavg") else None
+    payload["total_s"] = round(time.perf_counter() - t_start, 1)
+    base = write_report("power", fixture, payload)
+    print(open(base + ".md").read())
+    print(f"results: {base}.json / .md")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", choices=["scripted", "gaming", "analyze"], required=True)
-    p.add_argument("--fixture", default="pyfix")
+    p.add_argument("--mode", choices=["scripted", "gaming", "analyze", "power"], required=True)
+    p.add_argument("--fixture", default=None, help="default: pyfix (noisefix for --mode power)")
     p.add_argument("--conditions", default="walls,naive")
     p.add_argument("--workdir")
     p.add_argument("--repo", help="analyze: repo with a finished agent-run campaign")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--seeds", help="scripted: comma-separated seeds; one full run per seed (order of experiments changes)")
     p.add_argument("--baseline-repeats", type=int, default=5)
+    p.add_argument("--effects", default=POWER_EFFECTS, help="power: comma-separated planted effects (0 = no-op)")
+    p.add_argument("--seeds-n", type=int, default=8, help="power: seeds (replicates) per (effect, condition) cell")
+    p.add_argument("--alpha", type=float, default=0.05, help="power: campaign alpha (multiplicity none, budget 1, so this is the per-test alpha)")
+    p.add_argument("--max-minutes", type=float, default=40.0, help="power: if the first seed projects past this, drop to --min-seeds")
+    p.add_argument("--min-seeds", type=int, default=6)
     args = p.parse_args(argv)
-    return {"scripted": mode_scripted, "gaming": mode_gaming, "analyze": mode_analyze}[args.mode](args)
+    args.fixture = args.fixture or ("noisefix" if args.mode == "power" else "pyfix")
+    return {"scripted": mode_scripted, "gaming": mode_gaming, "analyze": mode_analyze, "power": mode_power}[args.mode](args)
 
 
 if __name__ == "__main__":

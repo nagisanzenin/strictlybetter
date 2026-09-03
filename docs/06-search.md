@@ -99,3 +99,30 @@ The loop stops, in order of precedence:
 - It does not run many parallel campaigns on the same metric set; contention on measurement destroys the noise floor.
 - It does not chase a goal below its noise floor by increasing repeats without bound; if `κσ` cannot be beaten in a plateau, the instrument is the problem, and the distiller says so. The minimum-detectable-effect gate at `campaign start` applies the same rule before the first experiment (`04-anti-overfitting.md` §4.2).
 - It does not accept an experimenter's claim that a change "should" help. Only confirmation numbers move the baseline.
+
+## 6.9 Frontier campaigns: when goals trade off
+
+`composition: pareto` (`02-metrics.md` §2.3) discards any candidate that regresses a goal. With two goals that compete, a faster scan that finds less, a smaller model that is less accurate, the loop accepts the few changes that improve one goal for free and then stalls, because every remaining move is a trade. There are three ways to handle a trade-off. The choice is made at gate 1.
+
+| Option | Spec | What the campaign returns | Choose it when |
+|---|---|---|---|
+| Guardrail with tolerance | one goal; the other metric a guardrail with `acceptance.tolerance_sigma` | one line of strictly better commits, the guardrail held within `τσ` | one goal matters and the other must merely not slip |
+| OEC | `composition: oec`, `oec_weights`; the traded metric also a guardrail with a floor | one line of commits screened by the weighted score, each confirmed on a single goal | the exchange rate is known in advance (one point of recall is worth ten seconds) |
+| Frontier | `composition: frontier`; optional `preference.weights`, `frontier_max` | a mapped set of non-dominated commits, one branch each, and a preferred point | the exchange rate is unknown, or the person who will decide it is not the one running the loop |
+
+**The rule.** The campaign keeps an archive of non-dominated commits, the members, each on its own branch `sb/<campaign>-f<k>`; `f0` is the base. Each experiment branches from a member the engine picks: fewest attempts, ties to the largest NSGA-II crowding distance, so the extremes are explored first and the frontier is pushed outward before it is filled in. `sb prereg --parent f2` overrides the pick. At screen a guardrail regression discards; a goal regression does not. At confirm the exact paired test runs against the parent member: the candidate must improve at least one goal at `α_look` and break no guardrail, and it may regress the others. Then it is compared with every active member on stored confirm medians: a member that is not worse on any goal beyond `τσ` and better on at least one beyond `κσ` dominates it (`discard dominated:<member>`); otherwise it joins as `f<k>`, retires the members it dominates, and the archive is pruned to `frontier_max` (default 8) by crowding distance, extremes last. `sb/<campaign>` follows the preferred member: the largest weighted sum of normalized gains over the base under `preference.weights`, else the knee, the member whose smallest gain over the base is largest. No ratchet is written. The frontier is the deliverable; a human picks a point at gate 2, or the preference does.
+
+**Two things the rule does not do.** Without weights the knee is `f0` itself until some member improves every goal over the base, because a trade scores below zero on the goal it gives up; declare weights when a trade is meant to win. The screen compares against the base commit's stored baseline, not the parent member, since a frontier campaign never rewrites `baseline.json`; it is a filter, and the confirm reference is the parent, measured fresh in the same `sb confirm`.
+
+**What carries an error rate.** "Improved a goal versus its parent" is the exact test of `13-statistical-guarantees.md` §13.2 at the campaign's per-test alpha. Non-dominance is a margin rule on medians and claims nothing (§13.7).
+
+**Example: recall against scan time.** A vulnerability scanner has two goals, `recall` on a fixture of planted findings (maximize) and `scan_seconds` (minimize), with `tests_pass` and `false_positives` as guardrails. Nobody knows in advance whether a two-point recall loss is worth halving the scan. The spec:
+
+```json
+{"id": "2026-09-03-scan-frontier", "composition": "frontier", "goals": ["recall", "scan_seconds"],
+ "guardrails": ["tests_pass", "false_positives"], "frontier_max": 8, "budget": {"experiments": 40}}
+```
+
+The first experiments branch from `f0`. A change that halves `scan_seconds` and drops `recall` by two points is accepted as `f1` (`frontier:improved:scan_seconds:traded:recall`); `f0` stays, since neither dominates the other. A later change from `f1` that recovers a point of recall beyond the noise margin at the same scan time joins as `f2` and retires `f1`. A change that is slower than its parent and finds no more is discarded at confirm (`noise`); one that beats its parent but is beaten on both goals by some member is `discard dominated:<member>`. At the end `sb frontier` lists the members with their confirm medians, the report's Frontier table shows who retired whom, and `sb/2026-09-03-scan-frontier` points at `f0` unless a member improved both goals or the spec declared `"preference": {"weights": {"recall": 3, "scan_seconds": 1}}`. The product owner reads the table and merges the branch of the point they want.
+
+**Cost.** Per experiment the same as `pareto`: one screen, one judge, one paired confirmation. The archive adds one branch per member and nothing else; members are never re-measured.
