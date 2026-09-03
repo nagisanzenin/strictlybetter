@@ -314,6 +314,7 @@ Start with [00 Thesis](docs/00-thesis.md), then [02 Metrics](docs/02-metrics.md)
 | [05 Cost](docs/05-cost-and-speed.md) · [06 Search](docs/06-search.md) · [07 Universality](docs/07-universality.md) | Levers, operators, bandits, archetypes, greenfield, science |
 | [08 Memory](docs/08-memory-and-inheritance.md) · [09 Governance](docs/09-governance.md) | Ledger, inheritance body, gates, halts, provenance |
 | [10 Implementation plan](docs/10-implementation-plan.md) · [11 ML principles](docs/11-ml-principles.md) · [12 Platforms](docs/12-platforms.md) | Layout, engine surface, milestones with status, ML mapping, port ladder |
+| [13 Statistical guarantees](docs/13-statistical-guarantees.md) · [14 Mathematics](docs/14-mathematics.md) | What carries an error rate and what does not; every formula and constant in one place |
 | [Citations](docs/citations.md) | Verified sources for the theory (the Ladder, reusable holdout, Goodhart taxonomy, Hyperband, MAP-Elites) |
 
 Maintainers: [CLAUDE.md](CLAUDE.md), [RELEASE_PROTOCOL.md](RELEASE_PROTOCOL.md), [CHANGELOG.md](CHANGELOG.md).

@@ -7,6 +7,7 @@
 - The knee rule for the preferred frontier point scored gains against the base, so with no weights a pure trade could never be preferred and `f0` stayed selected. It now normalizes each goal across the active members' own extremes and picks the most balanced member (ties by overall position); selftest "knee prefers the balanced member, not the base".
 - The per-confirmation alpha is split Bonferroni across the goals tested in that confirmation (`alpha_goal = alpha_look / G`, reported in the confirm event as `alpha_goal` and `n_goal_tests`; OEC campaigns test one composite and keep `alpha_look`). Before, a candidate null on every one of G goals was accepted with probability up to G·alpha_look, which docs/13 §13.7 had to state as a looseness; the family-wise bound now holds for multi-goal pareto and frontier campaigns. The power gate uses the split alpha, so multi-goal cards need more pairs (two goals at K = 40: 11 pairs).
 - README selftest count (88 → 117).
+- New `docs/14-mathematics.md`: every formula and constant the engine computes, in one place, with the function that computes it; docs/13 renumbered (a duplicated §13.6) and updated for the α split and the knee rule.
 
 Gates run for this release: selftest 117/117; unittest 62 OK; bun 17/17. Mutation, fuzz, and benchmarks unchanged from 1.2.0 (the alpha split makes acceptance strictly more conservative; single-goal campaigns, which every benchmark uses, are unaffected).
 
