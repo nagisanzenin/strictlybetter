@@ -21,9 +21,17 @@ Every metric card declares a fidelity ladder (`02-metrics.md`). The loop runs it
 
 1. All `N` candidates measured at `screen` (cheap: subset of tests, short bench, short training run) with `sb measure --fidelity screen`.
 2. Candidates beyond `κσ_screen` are promoted by `sb judge`. Sigma is measured per fidelity level (`baseline.json` keeps `screen`, `full`, and `confirm` entries); screen is noisier and the threshold accounts for it.
-3. `sb confirm` runs `full` for every card that defines it and discards a candidate that regresses, is invalid, or shows no positive movement there; whatever survives goes on to `confirm` (repeats, holdout, clean checkout) in the same command.
+3. `sb confirm` runs `full` for every card that defines it and discards a candidate that regresses, is invalid, or shows no positive movement there; whatever survives goes on to `confirm` (the pre-registered pairs against the campaign head, holdout, clean checkout) in the same command.
 
-Typical ratios for a Rust bench: screen 25 s, full 120 s, confirm 3 × 120 s. If one candidate in six promotes, the batch costs about 6 × 25 + 120 + 360 = 630 s instead of 6 × 480 = 2880 s at confirm-grade for all. With the `paired` wall on (the default), every `full` and `confirm` repeat runs twice, once on the campaign head and once on the candidate, interleaved, so the same batch costs 6 × 25 + 240 + 720 = 1110 s: confirmation takes about twice as long. That is the price of comparing against a head measured in the same minute instead of a baseline measured when the campaign started; on a loaded machine the bench showed that drift producing a false accept and a no-op accept, which is the one error no screening saving can buy back (`04-anti-overfitting.md` §4.2). Hyperband's insight is that the promotion rate can be tuned to the budget. Not in v1.0: a promotion-fraction setting; the promotion rate is whatever `κσ_screen` yields, and the false-promotion budget (§5.8) is the feedback on it.
+Typical costs for a Rust bench with the `paired` wall on (the default) and the default 10 confirmation pairs, for a timing card that gets one unmeasured warm-up per side at every level:
+
+| Level | Runs per candidate (measured + warm-up) | Wall-clock at 25 s screen, 120 s full and confirm |
+|---|---|---|
+| screen | 2 + 1 | 75 s |
+| full (paired) | 2 + 2 | 480 s |
+| confirm (10 pairs, paired) | 20 + 2 | 2640 s |
+
+If one candidate in six promotes, the batch costs about 3570 s (six screens, one full, one confirm) against about 18,700 s at confirm grade for all six. Confirmation dominates the cost of a batch, and its pairs are not negotiable: they are what buys the error rate (`04-anti-overfitting.md` §4.2), their number is fixed before the data, and the screen exists to spend them only on candidates that earned them. Pairing doubles the runs at `full` and `confirm`; that buys a head measured in the same minute instead of a baseline measured when the campaign started, and on a loaded machine the bench showed that drift producing a false accept and a no-op accept, which is the one error no screening saving can buy back. Hyperband's insight is that the promotion rate can be tuned to the budget. Not in v1.0: a promotion-fraction setting; the promotion rate is whatever `κσ_screen` yields, and the false-promotion budget (§5.8) is the feedback on it.
 
 **Early kill** applies inside a single long measurement: for metrics with intermediate values (training loss at checkpoints, tests in a suite), the harness stops a run whose intermediate is worse than the baseline's intermediate by more than a margin (default 3σ of the intermediate). This is the largest single saving for ML archetypes. Not in v1.0: the engine runs every measurement to completion or to its `timeout_s`; a card's screen command can implement its own early exit.
 
@@ -83,6 +91,7 @@ where `screen_s` is the sum of the goals' and guardrails' screen-level `secs_per
 - `false_promotions` and `false_promotion_rate_window`: promoted at screen but discarded at full or confirm, over the last 10 promotions, which is the screen fidelity's quality
 - `confirmed_effects` and `mean_confirmed_effect`: the relative confirmed improvement on the primary goal per accepted change
 - `holdout_gap_mean_last5`: screen improvement minus confirm improvement, as a ratio, over the last five accepted changes (`04-anti-overfitting.md` §4.4)
+- `alpha_campaign`, `alpha_test`, `multiplicity`, `confirmations_run`, `expected_false_accepts_upper`: the alpha accounting of the confirmation test (`04-anti-overfitting.md` §4.2). The last is `alpha_test × confirmations_run`, the expected number of false accepts if every confirmed candidate were null; the report prints it as "expected false accepts if every candidate were null: ≤ …"
 - `by_operator` attempts and accepts, `since_last_accept`, `exploration_level`, `budget_left`, `budget_exhausted`, `screen_untrusted`; `distill-stats` adds the `decision`
 
 Not in v1.0: a per-phase cost split (hypothesis, implementation, measurement, judgment), the yield curve (accepted improvements against experiments over time), and judge overhead as a fraction of spend. The ledger's `cost` events carry `tier`, so a reader can compute these from the file.
@@ -95,6 +104,7 @@ These numbers are in the campaign report and the inheritance body. A campaign wh
 
 - The noise floor is never lowered to save money. If a metric needs 7 repeats to be trustworthy on this machine, it gets 7 or it is quarantined. The minimum-detectable-effect gate is the same rule at campaign start: a goal whose smallest detectable improvement exceeds 50% on this host halts the start (`04-anti-overfitting.md` §4.2).
 - Confirmation is never skipped. A candidate the loop cannot afford to confirm is not accepted; it is archived with `budget` and the report says so.
+- The number of confirmation pairs is never raised after the data are seen. It is fixed on the card before the campaign, and `sb campaign start` refuses a goal whose pairs cannot reach the per-test alpha.
 - The judge is never skipped for promoted candidates. Its cost is small relative to a false acceptance.
 
 The engine's wall toggles (`04-anti-overfitting.md` §4.1) can switch each of these off. They exist for the meta-benchmark's naive condition; a campaign that turns one off has it recorded in `campaign.json`, in the ledger, and in the report.

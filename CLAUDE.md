@@ -3,7 +3,7 @@
 **What this repo is.** strictlybetter (github.com/nagisanzenin/strictlybetter) is a research loop for agentic
 coders. Pointed at a repo, it derives the project's metrics into *metric cards*, measures their
 noise, and runs pre-registered experiments under a budget, keeping a change only when it is
-strictly better: better on a goal by more than κσ, worse on no guardrail, confirmed on a holdout
+strictly better: better on a goal by an exact paired randomization test at a pre-registered alpha, worse on no guardrail, confirmed on a holdout
 the experimenter never saw, and passed by a judge that never saw the experimenter's reasoning.
 The deterministic engine is one stdlib file, `scripts/sb.py`; agents narrate what it prints.
 The theory lives in `docs/00` to `docs/11` and is the spec. Cold start: `docs/00-thesis.md`,

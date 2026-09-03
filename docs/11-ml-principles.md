@@ -5,8 +5,8 @@ The loop is not a neural network, but the discipline that keeps ML experiments h
 | ML principle | In strictlybetter | Doc |
 |---|---|---|
 | Train / validation / test split | Screen fidelity (experimenter sees) / full fidelity / confirm with holdout (harness only) | 02, 04 |
-| Overfitting to the validation set under adaptive selection | The Ladder: accept only if improvement exceeds a step size; reusable-holdout style leakage budget on confirm | 04 |
-| Noise-aware evaluation, multiple seeds | Measured sigma from k repeats at the same commit; acceptance threshold κσ | 02, 04 |
+| Overfitting to the validation set under adaptive selection | Acceptance by an exact paired sign-flip test at confirm on pre-registered interleaved pairs; discarded candidates' confirm numbers redacted from the experimenter | 04, 13 |
+| Noise-aware evaluation, multiple seeds | Measured sigma from k repeats at the same commit; screen threshold κσ; at confirm the same holdout seed on both sides of every pair | 02, 04 |
 | Winner's curse | Confirmation on an independent measurement, never on the screening number that selected the winner | 04 |
 | Early stopping with patience | Plateau detection: `patience` experiments without acceptance escalates exploration or stops | 06 |
 | Early termination of bad runs (Hyperband) | Multi-fidelity ladder; kill runs that are worse than baseline's checkpoint by a margin | 05 |
@@ -21,7 +21,8 @@ The loop is not a neural network, but the discipline that keeps ML experiments h
 | Simulated annealing | Stepping stones on a side branch, never on the campaign branch | 06 |
 | Reward hacking / specification gaming | Frozen instrument, holdout, blind judge, gaming-risk checklist per metric | 04 |
 | Pre-registration (from experimental science) | Ledger line with predicted effect before any diff exists | 03, 04 |
-| Multiple comparisons | Confirmation run as a per-candidate correction; halt on repeated `gamed` verdicts as a drift detector | 04 |
+| Multiple comparisons | Bonferroni over the pre-registered experiment budget: per-test alpha is `alpha / K`, so the family-wise false-accept probability per campaign is at most alpha; halt on repeated `gamed` verdicts as a drift detector | 04, 13 |
+| Optional stopping (peeking) | Sample size fixed before the data; an optional pre-registered two-stage design with Pocock alpha spending and a futility stop | 04, 13 |
 | Change-point detection over time | Periodic re-baseline; drift check on the ledger's time series | 04, 05 |
 | Meta-learning across tasks | Archetype priors for the bandit, updated slowly from many projects | 08 |
 | Cost-aware optimization | Cost per accepted improvement as the loop's own metric | 05 |

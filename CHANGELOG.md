@@ -1,5 +1,67 @@
 # Changelog
 
+## 1.2.0 — 2026-09-03 · the acceptance rule becomes a test
+
+Gates run for this release: <selftest N/N · unittest N · mutation N/N red · review K/K reports · fuzz 0/500 · numbers audit N numbers · gaming suite T/T caught, W/W walls load-bearing · live test · dogfood · user session verdict>
+Benchmark: see bench/results/<file>
+
+Until 1.1.2 the confirm level reused the screen heuristic (`Δ > κ_eff · σ · √(1/r + 1/k)`) on a
+candidate median of three repeats, adding repeats up to `max_repeats` when a round came back
+inconclusive. That rule carried no error rate, and the open-ended repeats were the optional stopping
+the docs warned against. 1.2.0 replaces it with a test that states an error rate and controls it.
+
+### Changed
+- **The confirm rule (Engine / Walls).** Confirmation measures a pre-registered number of
+  (candidate, head) pairs, interleaved ABBA with the same holdout value per pair, and accepts a goal
+  iff the exact Fisher–Pitman sign-flip randomization test on the paired improvements rejects "not
+  better" at the per-test alpha (one-sided; all `2^r` sign assignments up to 20 pairs, 20,000 seeded
+  draws above) and the median paired improvement clears the card's `acceptance.min_effect_rel`
+  (default 0). Guardrails block on the regression alternative at 0.10 or a median regression beyond
+  τσ; `equal` guardrails match exactly. `paired_randomization_test`, `paired_diffs`, `confirm_decision`.
+- **Multiplicity.** The campaign's `alpha` (0.05) is split Bonferroni over its pre-registered
+  `budget.experiments` (`multiplicity: bonferroni`, default; `none` reports alpha per test). The
+  family-wise false-accept probability of a campaign of null candidates is at most alpha.
+- **Sample size fixed before data.** No repeats are added after a look. A card may pre-register
+  `fidelity.confirm.stages: [r1, r2]`; each look spends `0.59 × alpha_test` (Pocock, two looks,
+  approximate) with a futility stop after the first.
+- **Defaults.** `CONFIRM_REPEATS` 3 → 10, because the smallest attainable p is `2^-r` and 10 pairs
+  reach `0.05 / K` for `K ≤ 50`. New constants `ALPHA_CAMPAIGN` 0.05, `ALPHA_GUARDRAIL` 0.10,
+  `POCOCK_TWO_LOOK` 0.59, `PERM_EXACT_MAX_PAIRS` 20, `PERM_MC_SAMPLES` 20000, `PERM_MC_SEED`.
+  Fixture cards carry 10 pairs.
+- **The power gate.** `sb campaign start` halts `underpowered:<metric>:pairs=r:alpha=…` when a goal's
+  pairs cannot reach the per-test (or per-look) alpha, and prints the minimum; `--allow-underpowered`
+  starts anyway with nothing acceptable on that goal.
+- **Bench re-validation (Bench).** `bench/run_bench.py` now decides "genuine" with the same exact test
+  on 6 interleaved (parent, commit) wall-clock pairs at one-sided 0.05, plus the output and test
+  checks, instead of a 2.5σ threshold.
+- **Docs.** `docs/02` §2.4, `docs/04` §4.2, `docs/00` C3/C4, `docs/05` §5.2 and §5.8, `docs/11`,
+  `docs/07` §7.4, `docs/03`, `docs/10`, `docs/01` now describe the two-level rule and claim only what
+  the engine does; the Ladder and reusable-holdout theorems are cited as motivation, not as guarantees.
+
+### Added
+- `docs/13-statistical-guarantees.md`: definitions, the exactness statement (Fisher 1935, Pitman
+  1937, Ernst 2004), the Bonferroni bound, the Pocock caveat (Pocock 1977), what breaks the guarantee,
+  the walls that carry no error rate, and what the benchmark can and cannot say.
+- `stats()` and the report: `alpha_campaign`, `alpha_test`, `multiplicity`, `confirmations_run`,
+  `expected_false_accepts_upper` (`alpha_test × confirmations_run`).
+- Card fields `acceptance.min_effect_rel`, `fidelity.confirm.stages`; campaign fields `alpha`,
+  `multiplicity`; ledger `confirm` events carry `tests.<metric>` (`p`, `alpha`, `n_pairs`, `exact`,
+  `mean_diff`, `median_diff`) and the provenance block prints them.
+
+### Versioning note
+The release protocol classifies a change to the acceptance rule or to any constant in the constants
+block as a major-line change, because every ledger and baseline on disk was produced under the old
+rule. This release changes both. What it invalidates: `confirm` verdicts, `confirm_effect`,
+`false_promotions` and `holdout_gaps` in 1.1.x ledgers were produced under the κσ rule with three
+repeats and are not comparable with 1.2.0 numbers; baselines and cards are unaffected except that a
+card whose confirm `repeats` is below the power gate's minimum now halts `campaign start`.
+
+This is not tuning to results. No constant was moved to make a benchmark pass: the rule was replaced,
+not adjusted. The old threshold and its repeat cap are gone; the new constants are the textbook
+values (alpha 0.05, Pocock's two-look constant, exact enumeration to 20 pairs) and `CONFIRM_REPEATS`
+follows from `alpha / K` by arithmetic, not from any measured effect. The benchmark line above is
+filled by re-running the bench after the change: the bench measures the rule, it did not choose it.
+
 ## 1.1.2 — 2026-09-03 · six issues from a second agent's ZCode run on redswarm-decoded
 
 Another agent ran the plugin on ZCode against `redswarm-decoded` the same day and filed issues #1–#6.

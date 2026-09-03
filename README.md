@@ -98,7 +98,7 @@ Other platforms: the same skill text and engine, installed per [Install](#instal
       │
       ▼
  1 · SCREEN    cheap runs, cheap model. must clear the measured noise
-      │        floor by 2.5σ ────────────────────────► discard (reason logged)
+      │        floor by 2.5σ (a filter, no claim) ──────► discard (reason logged)
       ▼
  2 · JUDGE     blind: reads the diff, the pre-registration and the numbers —
       │        never the experimenter's reasoning. the verdict schema has no
@@ -147,7 +147,7 @@ Six months of autoresearch-style loops produced a casebook of agents gaming thei
 | The trick | What stops it |
 |---|---|
 | Editing the benchmark, the tests, or the fixtures | A pre-edit hook denies the write; a hash of the frozen files is re-checked before every measurement; the metric cards themselves are fingerprinted. |
-| A lucky run that looks like a win | Every metric has a measured noise floor. A goal must beat it by 2.5σ. Then it is re-measured from a clean checkout on held-out inputs; the number that promoted it is thrown away. |
+| A lucky run that looks like a win | Screening uses a measured noise floor (2.5σ) as a filter. Acceptance is an exact paired randomization test: 10 interleaved (head, candidate) pairs on held-out inputs from a clean checkout, one-sided, at α = 0.05 split over the campaign's pre-registered experiment budget. The screening number is thrown away. |
 | Special-casing the benchmark's inputs or seeds | Confirmation uses seeds and slices the experimenter never saw, rotated every ten accepts. A growing gap between screen and confirm halts the campaign. |
 | Making a guardrail a little worse each time | Floors only move in the good direction. A guardrail that slipped keeps its old floor. Every past goal becomes a permanent guardrail. |
 | Talking the reviewer into it | The judge sees only the diff, the pre-registration, the numbers, and a checklist. Its verdict schema has no field for reasoning. Two `gamed` verdicts in a row halt the campaign. |
@@ -191,7 +191,7 @@ Prompts are advice. Hooks and hashes are walls.
 | The reviewer asks | The answer is already written |
 |---|---|
 | "Why did it touch this file?" | The pre-registered hypothesis the diff implements — hash-bound before the diff existed |
-| "Prove it is actually better." | Baseline → confirmed value per goal, with the measured noise floor it had to clear by 2.5σ |
+| "Prove it is actually better." | Baseline → confirmed value per goal, with the exact test's p-value, the number of pairs, and the α it had to beat |
 | "How do we know nothing else broke?" | Each guardrail has its own baseline → confirmed line; floors only ever move in the good direction |
 | "Is this thing gaming the benchmark?" | The blind judge's verdict — its schema has no field for reasoning — plus frozen-instrument hash checks, and every discarded diff archived with its reason |
 | "What did it cost?" | Budget charged before each experiment; dollars and minutes per accepted change, in the ledger and the report |
@@ -286,11 +286,12 @@ Nothing is optimized at the expense of correctness: the noise floor is never low
 
 ## Is it actually better than a naive loop?
 
-The loop benchmarks itself (`/strictlybetter:bench` or `python3 bench/run_bench.py`). Three modes:
+The loop benchmarks itself (`/strictlybetter:bench` or `python3 bench/run_bench.py`). Four modes:
 
 - **scripted**: 15 scripted experiments (3 real algorithmic wins, 6 no-ops, 6 gaming tricks from the casebook) through the real engine, with every wall on versus the naive autoresearch-skill shape (one benchmark run, tests as backpressure, no evaluator protection). Every accepted commit is then re-validated on fresh seeds with the pristine instrument and an external timer, so a change that only fooled the loop's own instrument counts as a false accept.
 - **gaming**: the six tricks under all walls and with each wall removed in turn. The matrix names which wall catches which trick.
 - **analyze**: the same re-validation for a campaign real agents ran.
+- **power**: the noise-floor power study on the `noisefix` fixture. One experiment per fresh campaign, for each planted effect (0%, 3%, 5%, 10%, 25%: the edit shrinks a work constant, a proportional speedup with identical output) × seed × condition. Reports acceptance rate with a Wilson 95% interval; the 0% row is the empirical false-accept rate at a per-test alpha of exactly 0.05 (multiplicity none, budget 1).
 
 Results are written by the engine to `bench/results/` and are the only source of quotable numbers. The current release's numbers, with their denominators and the machine they came from, are on the "Benchmark" line of [CHANGELOG.md](CHANGELOG.md). Timings are from one laptop and say so.
 

@@ -130,7 +130,7 @@ Honest note: the ratchet-with-noise-floor, the screen-then-confirm cascade, and 
 
 1. **Automatic metric discovery on an arbitrary repo.** Every tool above takes an eval command from the user. The closest are Sindri's interview and `/autoresearch-discover` (tunable parameters only).
 2. **A guard set that must not regress beyond its own noise floor, re-measured on every keep.** Only codex-autoresearch's secondary metrics and goal-md's constraints are partial precedents.
-3. **Noise-aware acceptance that is principled rather than ad hoc.** Existing floors are MAD, a rolling window of five, or a fixed tolerance. The Ladder and the reusable holdout are the theory; a three-way verdict with a capped adaptive confirmation and a campaign false-promotion budget is the practice.
+3. **Noise-aware acceptance that is principled rather than ad hoc.** Existing floors are MAD, a rolling window of five, or a fixed tolerance. The Ladder and the reusable holdout motivated the ratchet and the redaction; the practice is an exact paired randomization test on a pre-registered number of interleaved pairs, Bonferroni over the experiment budget, and a campaign false-promotion budget (`13-statistical-guarantees.md`).
 4. **Anti-gaming as a default, not a fork.** Structural evaluator protection exists in Crucible, Sindri, research-loop, dark-factory, and the tennis post-mortem; popular skills are prompt-only. None combine hook-enforced immutability, a holdout gap check, and curve-shape anomaly detection.
 5. **Inheritable, human-readable research memory** in the repo. Curie's tiered write access and DAG history are the right primitives and are in no plugin.
 6. **Science projects beyond ML training**, with reference-solution guardrails and problem-space holdouts.

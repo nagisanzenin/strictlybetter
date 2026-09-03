@@ -67,7 +67,8 @@ BASELINE_REPEATS = 5
 CONFIRM_REPEATS = 10         # paired repeats at confirm; 2^-10 lets an exact test reach alpha/K for K <= 50 at alpha 0.05
 ALPHA_CAMPAIGN = 0.05        # family-wise one-sided false-accept probability per campaign (multiplicity: bonferroni over the budget)
 ALPHA_GUARDRAIL = 0.10       # one-sided evidence-of-regression alarm per guardrail per confirmation (more sensitive than the goal test)
-POCOCK_TWO_LOOK = 0.59       # per-look alpha fraction for a two-stage design (Pocock, two looks, approx.)
+TWO_LOOK_SPLIT = 0.5         # per-look alpha fraction for a two-stage design: Bonferroni over the two looks (valid at any alpha, slightly conservative)
+POCOCK_TWO_LOOK = TWO_LOOK_SPLIT  # kept as an alias for older references
 PERM_EXACT_MAX_PAIRS = 20    # exact sign-flip enumeration up to 2^20; Monte Carlo above
 PERM_MC_SAMPLES = 20000
 PERM_MC_SEED = 20260903
@@ -1977,6 +1978,15 @@ def cmd_confirm(home: Home, args) -> int:
     verify_card_hashes(home, c)
     eid = args.id
     r = experiment_record(home, eid)
+    if c.get("multiplicity", "bonferroni") == "bonferroni" and c.get("walls", {}).get("paired", True) and c.get("walls", {}).get("noise_floor", True):
+        k_budget = int(num((c.get("budget") or {}).get("experiments", 0), 0)) or int(num(c.get("iteration_cap", DEFAULT_ITERATION_CAP), DEFAULT_ITERATION_CAP))
+        done = int(num(c.get("confirmations_run", 0)))
+        if done >= k_budget:
+            halt(home, c, f"alpha-budget-exhausted:{done}/{k_budget}")
+            raise SBError(f"the campaign's alpha budget is spent: {done} confirmations already run against a pre-registered K of {k_budget}; "
+                          f"a further test would break the family-wise bound. Campaign halted.")
+        c["confirmations_run"] = done + 1
+        home.save_campaign(c)
     js = r.get("judge_stat") or {}
     walls = c.get("walls", {})
     if js.get("verdict") not in ("promote", "accept-naive") and not args.force:
@@ -2253,17 +2263,19 @@ def paired_randomization_test(diffs: list, alternative: str = "greater") -> dict
 def paired_diffs(card: dict, cand: dict, head: dict) -> list:
     """Improvement per pair, signed so that positive = better for the card's direction."""
     sgn = card_sign(card)
-    rc = [x for x in (cand.get("runs") or []) if x.get("valid") and isinstance(x.get("value"), float)]
-    rh = [x for x in (head.get("runs") or []) if x.get("valid") and isinstance(x.get("value"), float)]
-    n = min(len(rc), len(rh))
-    return [sgn * (rc[i]["value"] - rh[i]["value"]) for i in range(n)]
+    rc, rh = (cand.get("runs") or []), (head.get("runs") or [])
+    out = []
+    for a, b in zip(rc, rh):   # same index = same repeat = same holdout value
+        if a.get("valid") and b.get("valid") and isinstance(a.get("value"), float) and isinstance(b.get("value"), float):
+            out.append(sgn * (a["value"] - b["value"]))
+    return out
 
 
 def alpha_per_test(c: dict) -> float:
     """Per-confirmation one-sided alpha after multiplicity control over the PRE-REGISTERED budget."""
     alpha = float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN))
     mult = c.get("multiplicity", "bonferroni")
-    k = int(num((c.get("budget") or {}).get("experiments", 0), 0))
+    k = int(num((c.get("budget") or {}).get("experiments", 0), 0)) or int(num(c.get("iteration_cap", DEFAULT_ITERATION_CAP), DEFAULT_ITERATION_CAP))
     if mult == "bonferroni" and k > 0:
         return alpha / k
     return alpha
@@ -2327,6 +2339,22 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
                           "median_diff": med, "tolerance_abs": tol, "regressed": bool(reg)}
             if reg:
                 regressed.append(mid)
+    if c.get("composition") == "oec" and not invalid:
+        weights = c.get("oec_weights") or {}
+        per_goal = {}
+        for comp in comps:
+            mid = comp["id"]
+            if mid in c["goals"] and comp.get("valid") and cards[mid]["direction"] != "equal":
+                d = paired_diffs(cards[mid], results.get(mid) or {}, head_results.get(mid) or {})
+                hm = abs(float(comp.get("baseline") or 0.0)) or 1.0
+                per_goal[mid] = [float(weights.get(mid, 1.0)) * x / hm for x in d]
+        if per_goal:
+            n = min(len(v) for v in per_goal.values())
+            composite = [sum(v[i] for v in per_goal.values()) for i in range(n)]
+            t = paired_randomization_test(composite, "greater")
+            tests["__oec__"] = {"kind": "paired-sign-flip", "alternative": "weighted-composite-improvement", "p": t["p"], "alpha": a_look, "n_pairs": t["n"], "exact": t["exact"], "mean_diff": t["stat"]}
+            improved = list(per_goal.keys()) if (t["p"] is not None and t["p"] <= a_look and (t["stat"] or 0) > 0) else []
+            inconclusive = [] if improved else ([list(per_goal.keys())[0]] if (t["stat"] or 0) > 0 and (t["p"] or 1) < 0.5 else [])
     out = {"level": "confirm", "alpha_campaign": float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN)), "alpha_test": a_test, "alpha_look": a_look,
            "look": look, "looks": looks, "multiplicity": c.get("multiplicity", "bonferroni"), "tests": tests, "improved": improved, "regressed": regressed, "invalid": invalid}
     if invalid and c.get("walls", {}).get("validity", True):
@@ -2976,7 +3004,11 @@ def selftest() -> int:
     t = paired_randomization_test([3.0, 2.5, 2.8, 3.1, 2.9, 3.0, 2.7, 3.2, 2.6, 3.0, -0.1, 0.2, 2.9, 3.0, 2.8, 3.1, 2.9, 3.0, 2.7, 3.2, 2.6, 3.0], "greater")
     check("sign-flip: Monte Carlo above the exact limit", t["exact"] is False and t["p"] < 0.01)
     check("alpha per test is alpha over the budget", abs(alpha_per_test({"alpha": 0.05, "multiplicity": "bonferroni", "budget": {"experiments": 10}}) - 0.005) < 1e-12
-          and alpha_per_test({"alpha": 0.05, "multiplicity": "none", "budget": {"experiments": 10}}) == 0.05)
+          and alpha_per_test({"alpha": 0.05, "multiplicity": "none", "budget": {"experiments": 10}}) == 0.05
+          and abs(alpha_per_test({"alpha": 0.05, "multiplicity": "bonferroni", "budget": {"hours": 2}}) - 0.05 / DEFAULT_ITERATION_CAP) < 1e-12)
+    pd = paired_diffs({"direction": "minimize"}, {"runs": [{"valid": True, "value": 1.0}, {"valid": False, "value": None}, {"valid": True, "value": 3.0}]},
+                      {"runs": [{"valid": True, "value": 2.0}, {"valid": True, "value": 9.0}, {"valid": True, "value": 4.0}]})
+    check("pairs align by index and drop invalid members", pd == [1.0, 1.0])
     tcard_ms = {"id": "t", "kind": "goal", "direction": "minimize", "unit": "ms", "measure": {"command": "x", "parse": "metric-line:t"}}
     tcard_ct = {"id": "c", "kind": "guardrail", "direction": "minimize", "unit": "count", "measure": {"command": "x", "parse": "metric-line:c"}}
     check("timing metric screens with 2 repeats and 1 warm-up", fidelity_spec(tcard_ms, "screen")["repeats"] == 2 and fidelity_spec(tcard_ms, "screen")["warmup"] == 1)
