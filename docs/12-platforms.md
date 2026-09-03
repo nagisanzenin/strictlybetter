@@ -40,6 +40,13 @@ degrades where, and what was actually verified. The per-platform receipts live i
 - **No pre-edit hook (Hermes, Antigravity, OpenClaw; OpenCode V2 until verified):** an experimenter
   that edits a frozen path is caught at `sb submit` (integrity check → `discard: integrity`, two in a row
   halt the campaign). The wall moves from the tool boundary to the gate; it does not disappear.
+  The same holds for the two 1.1.0 denials: the guard's refusal to edit under an `external_instruments`
+  path or outside `scope_paths` inside a worktree exists only where a pre-edit hook runs `sb guard`;
+  elsewhere `sb submit` enforces scope at gate time (`scope:<file>`) and external tampering is caught
+  by the content hash before the next decision (`external-tampered:<path>` halts). On Claude Code the
+  hook's fast path starts the engine only when it finds a campaign under the project directory or
+  above the edited file, so the external-instrument denial holds when the session's project
+  directory is the campaign repo, not when the session was opened in the harness repo.
 - **No Stop hook (everything but Claude Code, Codex, ZCode, and the dsh bridge):** the loop does not
   re-invoke itself. `sb drive --command '<one-shot agent command>' --cycles N` runs the platform's own
   binary once per cycle from a terminal and stops on halt, STOP, budget, or end.

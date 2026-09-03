@@ -254,6 +254,12 @@ A greenfield project with no tests or benches yet gets an *instrument campaign* 
 
 Science projects get three extra rules: reproducing the reference result is a guardrail from the start, confirmation uses parameter settings the experimenter never saw, and every hypothesis must name a mechanism.
 
+**Several repos, one project.** One campaign per repo. The other repos are either instruments or services.
+A harness in a sibling repository goes in `external_instruments`: content-hashed at start, frozen for the campaign, a change halts the loop.
+A database or control plane the measurement needs goes in `services`: brought up and torn down around every measurement, with `SB_CHECKOUT` telling the compose file where the code under test is.
+A monorepo runs one campaign per package with `scope_paths`.
+One experiment that changes two repos at once is not supported and not planned. The industry answer is contracts and versioning, one repo per change (`docs/07-universality.md` §7.7).
+
 ---
 
 ## Cost

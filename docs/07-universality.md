@@ -11,7 +11,7 @@ An archetype is a discovery prior: default metric cards, default protected paths
 | `rust-crate` | criterion benches, compile time, binary size, unsafe count | `cargo test`, `cargo clippy -D warnings`, public API surface (via `cargo public-api`), MSRV build | CPU frequency scaling, incremental cache state |
 | `python-package` | test count/pass, coverage, mutation score, import time, benchmark suite | pytest, mypy/pyright errors, ruff | interpreter warm-up, hash randomization |
 | `node-frontend` | bundle size, Lighthouse perf/a11y, TTI, test pass | tsc, eslint, unit tests, visual snapshots | network stubs, headless timing |
-| `service-api` | p50/p95 latency at fixed RPS, error rate, RSS, cold start | integration tests, contract tests, security scan count | load generator jitter, GC, connection reuse |
+| `service-api` | p50/p95 latency at fixed RPS, error rate, RSS, cold start | integration tests, contract tests, security scan count | load generator jitter, GC, connection reuse; a database or compose stack the measurement needs is declared once as the campaign's `services` (§7.7) |
 | `cli-tool` | startup time, binary size, help completeness, test pass | tests, shell completion, `--help` snapshot | shell startup, disk cache |
 | `ml-training` | val loss / bpb / accuracy at fixed budget, tokens/s, peak memory | held-out test split (confirm only), determinism check, train loss sanity | seed, dataloader order, GPU clocks, nondeterministic kernels |
 | `ml-inference` | latency, throughput, accuracy on eval set | accuracy floor, memory | batch composition, warm-up |
@@ -66,3 +66,35 @@ The rule is unchanged: the measurement must be a command the experimenter cannot
 - Discovery is heuristic. The archetype table will be wrong for unusual projects; the human gate exists to catch that.
 - Some metrics are too noisy on a developer machine (sub-millisecond latency, GPU throughput on a shared box). The loop reports these as unusable rather than pretending (`sb campaign start` halts with `instrument-unusable` when a goal's minimum detectable effect exceeds 50%); a dedicated measurement host is a configuration option, not a requirement.
 - Some projects have no cheap fidelity level (a full training run is the only measurement). The loop still works, with fewer, better-chosen hypotheses; the bandit and the diagnostics matter more.
+
+## 7.7 Multi-repo, monorepo, and service-backed projects
+
+A campaign is one git repository: one head commit, one branch, one worktree per experiment. Three campaign spec fields (`02-metrics.md` §2.3) fit that unit to the layouts real projects have.
+
+**External instruments: `external_instruments`.** The harness often lives in a sibling repository: rustc-perf next to rust-lang/rust, lm-evaluation-harness next to a model repo, `redswarm-decoded/bench` next to `redswarm-hand`. The campaign spec lists such paths as absolute paths outside the repo; a card lists its own under `integrity.external_paths`. At `sb campaign start` every path is content-hashed into `campaign.json` under `external_hashes`: a file by its bytes, a directory recursively (skipping `.git`, `__pycache__`, `node_modules`, `target`, `.venv`, `venv`, `.tox`, `.mypy_cache`, `.pytest_cache`, `dist`, `build`). A path that does not exist, or that is inside the repo, is an error at start; inside the repo it belongs under `frozen_paths`. Before every decision (`sb measure` while running, `sb judge`, `sb confirm`, `sb accept`) the hashes are re-checked, and a mismatch halts the campaign with `external-tampered:<path>`. The guard denies any edit under an external instrument while a campaign is running. `sb next --json` lists the merged set as `external_instruments`.
+
+**Scope: `scope_paths`.** A monorepo runs one campaign per package. `scope_paths` is a list of repo-relative patterns (`dir/` prefix, glob, or exact path, the same matcher as frozen paths). When it is non-empty, `sb submit` marks any changed file outside it as the integrity violation `scope:<file>`, and the guard denies edits inside an experiment worktree that fall outside it. Frozen and protected checks run first and still apply. An empty scope, the default, is the whole repo. `sb next --json` lists `scope_paths`.
+
+**Services: `services`.** A measurement that needs a database, a compose stack, or a mock server declares it once instead of in every card's command. The object has `setup`, `ready`, `teardown`, `cwd`, `ready_timeout_s` (default 120), `ready_interval_s` (2), `setup_timeout_s` (600), and `teardown_timeout_s` (300). Campaign-level services are brought up once per measuring command (`sb baseline`, `sb measure`, `sb confirm`, `sb card probe`) around all cards; the same object on a card, `card.services`, is brought up around each measurement of that card. `ready` is polled until it exits 0 or `ready_timeout_s` passes. Commands run in the checkout (or `cwd` under it) with `SB_CHECKOUT` set to the checkout path, so a compose file can mount the code under test. A setup failure or a readiness timeout makes the measurement INVALID (`discard: invalid`, never a crash); `sb baseline` and `sb card probe` refuse to run instead. Teardown always runs, in a `finally`.
+
+**The recommended shape.** One campaign per repo. The other repos are either instruments (`external_instruments`, frozen) or services (`services`, brought up around measurement). A cross-repo atomic experiment, one change spanning two repos, is not supported and is not planned; the industry answer is contracts and versioning, one repo per change. Monorepos run one campaign per package via `scope_paths`.
+
+**Worked example, RedSwarm shape.** The campaign repo is the scanner client. The sibling harness directory is the instrument. The control plane the client talks to is a service, started from a compose file in the client repo that pins the control-plane image by tag. The harness prints `METRIC scan_seconds=…` and `METRIC findings_sha=…`, so the cards are `metric-line:` parsers and need no new code.
+
+```json
+{
+  "id": "2026-09-03-hand-scan-time",
+  "goals": ["scan_seconds"],
+  "guardrails": ["findings_sha", "tests_failed"],
+  "external_instruments": ["/Users/me/Documents/Github/redswarm-decoded/bench"],
+  "scope_paths": [],
+  "services": {
+    "setup": "docker compose -f \"$SB_CHECKOUT/compose.yml\" up -d --build",
+    "ready": "curl -sf localhost:9000/health",
+    "teardown": "docker compose -f \"$SB_CHECKOUT/compose.yml\" down -v"
+  },
+  "budget": {"experiments": 40}
+}
+```
+
+The `scan_seconds` card runs `python3 /Users/me/Documents/Github/redswarm-decoded/bench/run.py --target http://localhost:9000` from the checkout with `"parse": "metric-line:scan_seconds"` and lists the same harness directory under `integrity.external_paths`; `findings_sha` is an `equal` guardrail with `reuse_output: true` over the same command. An experimenter that edits the harness is denied by the guard. A harness edited from another session halts the campaign as `external-tampered:/Users/me/Documents/Github/redswarm-decoded/bench` before the next decision. A control plane that never answers `/health` makes that measurement invalid, so the candidate is discarded rather than accepted on a missing number. If the control plane itself needs improving, that is a second campaign in its own repo, with the client pinned as its service.

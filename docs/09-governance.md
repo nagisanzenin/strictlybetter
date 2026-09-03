@@ -13,12 +13,14 @@ Between the gates the loop asks nothing. If it needs a human, it halts and says 
 ## 9.2 What the loop may not touch
 
 - **Frozen paths** (the instrument): tests, benches, fixtures, eval scripts, reference outputs. Editable only in an instrument campaign, where the implementation is frozen instead.
+- **External instruments** (`external_instruments` in the campaign spec, `integrity.external_paths` on a card): absolute paths outside the repo, such as a harness in a sibling repository. Content-hashed at `sb campaign start`, re-checked before every decision, and denied to the experimenter by the guard while a campaign runs.
+- **Anything outside the scope** (`scope_paths`, when set): in a monorepo the campaign edits one package. Frozen and protected rules apply first; a changed file outside the scope is the integrity violation `scope:<file>`.
 - **Protected paths**: CI configuration, secrets and env files, licenses, generated code, anything the user adds. The engine's defaults are `.github/`, `.gitlab-ci.yml`, `.env`, `.env.*`, `*.pem`, `*.key`, `secrets/`, `LICENSE`, `LICENSE.*`, plus the profile's and the campaign's `protected_paths`. Dependency manifests and lockfiles are a separate rule: touching one is an integrity violation unless the hypothesis's operator is `dependency`, and each touched manifest adds one sigma to the threshold.
 - **The main branch** and any branch not created by the loop.
 - **The network**, beyond package registries needed to build. No deployments, no external services, no telemetry. The engine itself has no network code (the selftest parses its AST for network imports); the agents' network access is the platform's.
 - **Its own rules**: `.strictlybetter/metrics/*.json`, `campaign.json`, `baseline.json`, `ratchet.json`, and the harness itself are outside the experimenter's write set. The guard denies the whole state home except `inbox/` and `tmp/`, and `sb submit` fails a diff that touches `.strictlybetter/`.
 
-Enforcement is layered: on Claude Code the PreToolUse hook runs `sb guard --stdin` and denies (exit 2) writes to frozen and protected paths, to the state home, and to anything outside an experiment worktree, while a campaign is running (`SB_GUARD=off` or a `guard.off` file disables it for a human session); on every platform `sb submit` re-checks the diff and the eval hash, and `sb measure` refuses an experiment that failed integrity. The prompt tells the agent the rules; the hook and the hash make them true.
+Enforcement is layered: on Claude Code the PreToolUse hook runs `sb guard --stdin` and denies (exit 2) writes to frozen and protected paths, to external instruments, to files outside `scope_paths` inside a worktree, to the state home, and to anything outside an experiment worktree, while a campaign is running (`SB_GUARD=off` or a `guard.off` file disables it for a human session); on every platform `sb submit` re-checks the diff (frozen, protected, state, and scope) and the eval hash, the external hashes and the card fingerprints are re-verified before `sb measure`, `sb judge`, `sb confirm`, and `sb accept`, and `sb measure` refuses an experiment that failed integrity. The prompt tells the agent the rules; the hook and the hash make them true.
 
 ## 9.3 Budgets and the kill switch
 
@@ -31,7 +33,8 @@ Enforcement is layered: on Claude Code the PreToolUse hook runs `sb guard --stdi
 
 The principle is the Toyota one: the machine stops when it detects a defect rather than continuing to produce. Halt, not discard, on:
 
-- two consecutive integrity violations at `sb submit` (frozen, protected, or state path touched; eval hash changed; dependency manifest touched outside the `dependency` operator); a clean submit resets the count
+- two consecutive integrity violations at `sb submit` (frozen, protected, state, or out-of-scope path touched; eval hash changed; dependency manifest touched outside the `dependency` operator); a clean submit resets the count
+- an external instrument whose content hash differs from the one taken at `sb campaign start` (`external-tampered:<path>`), or a metric card that changed or disappeared (`card-tampered:<id>`, `card-missing:<id>`); checked before `sb measure` while running, `sb judge`, `sb confirm`, and `sb accept`
 - a goal or guardrail that has no valid baseline or no measured sigma at `sb campaign start` (the world changed under the loop: toolchain update, service down), or a goal whose minimum detectable effect exceeds 50% on this host (`instrument-unusable`; `--allow-unusable` overrides)
 - the judge returning `gamed` twice in a row (the hypothesis generator has drifted toward gaming and needs a human look)
 - a holdout gap ratio above 0.75 averaged over the last five acceptances (`04-anti-overfitting.md` §4.4)
@@ -44,7 +47,7 @@ Halts are written to `campaign.json` (`status: halted`, `halt_reason`, `halted_a
 
 ## 9.5 Provenance
 
-Every accepted commit contains, in its message, a `strictlybetter provenance` block: the experiment id and campaign, the operator class, the hypothesis, the pre-registration hash, the diff size and touched dependency manifests, each goal's and guardrail's baseline and confirmed value with delta, sigma, and threshold, the judge's verdict and pattern, and the confirmation level, rounds, holdout flag, and κ_eff. A change without this block did not come from the loop. Reviewers and future agents can audit any commit without the ledger file.
+Every accepted commit contains, in its message, a `strictlybetter provenance` block: the experiment id and campaign, the operator class, the hypothesis, the pre-registration hash, the diff size and touched dependency manifests, each goal's and guardrail's baseline and confirmed value with delta, sigma, and threshold, the judge's verdict and pattern, and the confirmation level, rounds, holdout flag, paired flag, and κ_eff. A change without this block did not come from the loop. Reviewers and future agents can audit any commit without the ledger file.
 
 ## 9.6 Secrets and data
 

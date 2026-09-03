@@ -1,5 +1,5 @@
 {
-  "_comment": "docs/02 §2.3 in JSON. status: proposed | running | halted | ended. composition: pareto | oec (oec requires oec_weights: {metric_id: weight}). mode: optimize | instrument (instrument inverts frozen and protected roles per docs/07 §7.3). walls are the five walls of docs/04 plus the pre-registration and anomaly-breaker checks; every one defaults to true and turning one off is recorded in the ledger and the report. Placeholders in {{...}} are filled at gate 1; the harness rejects a campaign that still contains one.",
+  "_comment": "docs/02 §2.3 in JSON. status: proposed | running | halted | ended. composition: pareto | oec (oec requires oec_weights: {metric_id: weight}). mode: optimize | instrument (instrument inverts frozen and protected roles per docs/07 §7.3). walls are the five walls of docs/04 plus the pre-registration, anomaly-breaker, and paired-confirmation checks; every one defaults to true and turning one off is recorded in the ledger and the report. Placeholders in {{...}} are filled at gate 1; the harness rejects a campaign that still contains one.",
   "schema_version": 1,
   "id": "{{campaign_id}}",
   "created_at": "{{iso_timestamp}}",
@@ -14,6 +14,12 @@
   "plateau_patience": 8,
   "protected_paths": ["{{protected_path}}"],
   "frozen_paths": ["{{frozen_path}}"],
+  "external_instruments": [],
+  "_comment_external_instruments": "Absolute paths OUTSIDE the repo that are part of the instrument (a harness in a sibling repo). Content-hashed at `sb campaign start` into external_hashes; re-checked before every decision (a mismatch halts with external-tampered:<path>); the guard denies edits under them while the campaign runs. A path inside the repo, or one that does not exist, is an error at start: inside the repo it belongs under frozen_paths. Cards add their own under integrity.external_paths. docs/07 §7.7.",
+  "scope_paths": [],
+  "_comment_scope_paths": "Repo-relative patterns (dir/ prefix, glob, or exact path) the experimenter may change; empty means the whole repo. When non-empty, `sb submit` marks any changed file outside them as the integrity violation scope:<file> and the guard denies such edits inside an experiment worktree. Frozen and protected paths are checked first and still apply. One campaign per monorepo package.",
+  "services": null,
+  "_comment_services": "null, or {setup, ready, teardown, cwd, ready_timeout_s: 120, ready_interval_s: 2, setup_timeout_s: 600, teardown_timeout_s: 300}. Brought up once per measuring command (baseline, measure, confirm, card probe) around all cards; commands run in the checkout (or cwd under it) with SB_CHECKOUT set to the checkout path so a compose file can mount the code under test. ready is polled until it exits 0 or ready_timeout_s passes. Setup failure or readiness timeout makes the measurement invalid (discard: invalid; baseline and card probe refuse to run). Teardown always runs. Example: setup `docker compose -f \"$SB_CHECKOUT/compose.yml\" up -d --build`, ready `curl -sf localhost:9000/health`, teardown `docker compose -f \"$SB_CHECKOUT/compose.yml\" down -v`. The same object on a card (card.services) wraps that card only.",
   "eval_hash": null,
   "branch": "sb/{{campaign_id}}",
   "base_commit": "{{head_commit}}",
@@ -27,7 +33,8 @@
     "frozen_guard": true,
     "judge": true,
     "prereg": true,
-    "anomaly_breaker": true
+    "anomaly_breaker": true,
+    "paired": true
   },
   "iteration_cap": 200,
   "max_parallel": 2,

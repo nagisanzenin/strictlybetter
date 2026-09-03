@@ -38,8 +38,12 @@
   },
   "integrity": {
     "frozen_paths": ["{{path the experimenter may not touch for this metric to be trusted}}"],
-    "_comment": "Hashed at campaign start into campaign.eval_hash together with the other cards' frozen paths. Any diff touching them is rejected before measurement and halts the campaign."
+    "_comment": "Hashed at campaign start into campaign.eval_hash together with the other cards' frozen paths. Any diff touching them is rejected before measurement and halts the campaign.",
+    "external_paths": [],
+    "_comment_external_paths": "Optional. Absolute paths OUTSIDE the repo this number depends on (a harness in a sibling repo). Merged with the campaign's external_instruments, content-hashed at campaign start into campaign.external_hashes, re-checked before every decision (halt external-tampered:<path>), and denied to the experimenter by the guard. A path inside the repo is refused at start: use frozen_paths. Part of the card fingerprint."
   },
+  "services": null,
+  "_comment_services": "Optional. null, or {setup, ready, teardown, cwd, ready_timeout_s: 120, ready_interval_s: 2, setup_timeout_s: 600, teardown_timeout_s: 300}, the same shape as the campaign spec's services. Brought up around each measurement of this card, in the checkout (or cwd under it) with SB_CHECKOUT set; ready is polled until exit 0 or the timeout; teardown always runs. Setup failure or readiness timeout makes the measurement invalid, never a crash. Use the campaign-level services for what every card needs. Part of the card fingerprint.",
   "degradation": {
     "apply": "{{shell command that makes the metric worse in a throwaway worktree, e.g. insert a sleep in the hot function, append an unused import, break one assertion's target}}",
     "expected": "worse",

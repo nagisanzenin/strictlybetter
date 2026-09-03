@@ -63,6 +63,8 @@ into `metrics/`. Transcribed from `validate_card`, `fidelity_spec`, `measure_onc
 | `acceptance.kappa` | no | default 2.5; goal must move by more than `kappa_eff × sigma` |
 | `acceptance.tolerance_sigma` | no | default 1.0; as a guardrail, may not drop more than this many sigma. **Use `0` for deterministic guardrails** (test failures, lint counts, checksums): any drop regresses |
 | `integrity.frozen_paths` | no | paths hashed at campaign start and denied to the experimenter: the bench, the tests, fixtures, eval scripts, reference outputs. Patterns: `dir/` prefix, glob (`*.pem`), or exact path |
+| `integrity.external_paths` | no | absolute paths **outside** the repo this number depends on (a harness in a sibling repo). Merged with the campaign's `external_instruments`, content-hashed at campaign start into `campaign.json` `external_hashes`, re-checked before every decision (halt `external-tampered:<path>`), and denied to the experimenter by the guard. A path inside the repo is refused at start: use `frozen_paths`. Part of the card fingerprint |
+| `services` | no | `{setup, ready, teardown, cwd, ready_timeout_s: 120, ready_interval_s: 2, setup_timeout_s: 600, teardown_timeout_s: 300}`, the same shape as the campaign spec's `services`. Brought up around each measurement of this card, in the checkout (or `cwd` under it) with `SB_CHECKOUT` set to the checkout path; `ready` is polled until exit 0 or the timeout; `teardown` always runs. Setup failure or readiness timeout makes the measurement invalid, never a crash. Use the campaign-level `services` for what every card needs. Part of the card fingerprint |
 | `degradation.apply` | for probe | a shell recipe, run in a throwaway worktree, that must make the metric **worse by more than sigma**. Anchor it (assert the target text exists) so a stale recipe fails loudly instead of silently doing nothing. `card probe` refuses a card without it |
 | `gaming_risks` | yes in spirit | strings handed to the blind judge; `card validate` flags an empty list. Name the cheap tricks that would move *this* number without improving the property |
 | `contention_safe` | no | `true`: may run concurrently with other measurements (counts, checksums). `false` (default): timing-sensitive, the engine serializes it behind `measure.lock` |
@@ -97,7 +99,7 @@ A run is **invalid**, and never compared, when: the command times out; it exits 
 ## Card quality rules for the metrologist
 
 1. **Reuse before inventing.** A `make bench`, a CI job that prints a number, a pytest-benchmark suite, an eval script the maintainers already trust outranks any archetype default. The maintainers' noise is already tuned.
-2. Every frozen instrument lives in `integrity.frozen_paths`. If the command is a script in the repo, the script is frozen.
+2. Every frozen instrument lives in `integrity.frozen_paths`. If the command is a script in the repo, the script is frozen. If the script lives in a sibling repo, its absolute path goes in `integrity.external_paths` (docs/07 §7.7); it is hashed and denied the same way.
 3. Every card needs a working `degradation.apply`: the engine will run it. Verify the anchor exists; do not apply it to the repo yourself.
 4. `direction: equal` guardrails (checksums, snapshots) are the cheapest regression wall a project can have. Add one whenever the bench can hash its outputs.
 5. A timing metric gets `contention_safe: false` and `screen.repeats ≥ 1`; a count gets `contention_safe: true` and `tolerance_sigma: 0`.

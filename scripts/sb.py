@@ -2550,7 +2550,7 @@ def redact(rec: dict) -> dict:
     r = dict(rec)
     if r.get("verdict") == "discard" and isinstance(r.get("confirm"), dict):
         cf = dict(r["confirm"])
-        for k in ("results", "comparisons", "confirm_effect"):
+        for k in ("results", "comparisons", "confirm_effect", "head_results"):
             if k in cf:
                 cf[k] = "<redacted: holdout numbers of a discarded candidate>"
         r["confirm"] = cf

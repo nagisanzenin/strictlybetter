@@ -17,7 +17,7 @@ ORIENT ──► INSTRUMENT ──► ┌─► HYPOTHESIZE ─► EXPERIMENT �
   profile.json        # the orienteer's profile (archetypes, commands, purpose, constraints, protected paths)
   profile.md          # the same, rendered for humans by `sb profile write`
   metrics/*.json      # metric cards (02-metrics.md)
-  campaign.json       # active set, walls, budget, spend, status, branch, eval hash, counters
+  campaign.json       # active set, walls, budget, spend, status, branch, eval hash, external_hashes, scope_paths, services, counters
   baseline.json       # per-metric levels {screen|full|confirm}, best, sigma, commit, fingerprint
   ratchet.json        # global ratchet: every past goal's best, sigma, commit, campaign, direction
   bandit.json         # operator-class statistics for this repo (alpha, beta, attempts, accepts, effect_sum, cost_s)
@@ -54,10 +54,10 @@ The engine requires `archetypes`, `commands`, and `purpose`. Orientation ends wi
 
 Agent: `metrologist`. Turns the profile into candidate metric cards (`02-metrics.md` §2.6), added with `sb card add --file`. Then the harness, not the agent:
 
-1. `sb baseline` runs each card `k` times at the campaign head from a clean throwaway worktree, at every fidelity level the card defines (`k = 5` fixed; `-k` raises it for noisy or cheap metrics), and records median, sigma (1.4826 × MAD for four or more repeats, sample standard deviation for two or three), and seconds per run per level.
+1. `sb baseline` runs each card `k` times at the campaign head from a clean throwaway worktree, at every fidelity level the card defines (`k = 5` fixed; `-k` raises it for noisy or cheap metrics), and records median, sigma (1.4826 × MAD for four or more repeats, sample standard deviation for two or three), and seconds per run per level. When the campaign spec declares `services`, `sb baseline` brings them up once around all cards (a card's own `services` around that card) and refuses to run if they never become ready.
 2. Quarantines a metric whose confirm-level baseline has no valid median (it failed, timed out, or did not parse). A campaign that lists a quarantined metric, or a goal or guardrail with no measured sigma, halts at start. Not in v1.0: a disagreement bound that quarantines flaky-but-parsing metrics; raise `-k` and read the sigma instead.
 3. Runs each card's monotonicity selftest with `sb card probe <id>`: a known degradation must make the metric worse (`02-metrics.md` §2.6). Not in v1.0: engine-run sensitivity probes; the metrologist runs those by hand.
-4. `sb campaign start --file` hashes the frozen paths from a clean checkout and stores the eval hash in `campaign.json`.
+4. `sb campaign start --file` hashes the frozen paths from a clean checkout and every `external_instruments` path in place, and stores the eval hash and `external_hashes` in `campaign.json`.
 5. Writes `baseline.json` (and the card's `noise`).
 
 Then the first human gate: the user picks goals, guardrails, budget, and confirms protected paths. `sb campaign start --file campaign.json` writes `campaign.json`, baselines any metric that lacks one at the head commit, computes each goal's minimum detectable effect (halting as `instrument-unusable` when it exceeds 50%, unless `--allow-unusable`), and creates the campaign branch.
@@ -82,10 +82,10 @@ Batch size is set by the cost lever (`05-cost-and-speed.md` §5.7): more, cheape
 
 ### EXPERIMENT
 
-`sb prereg` already created the worktree under `.strictlybetter/wt/<id>/` from the campaign head. Agent (tier chosen by operator class) implements the hypothesis inside the worktree only; while a campaign runs, the guard hook denies edits anywhere else. On completion the harness:
+`sb prereg` already created the worktree under `.strictlybetter/wt/<id>/` from the campaign head. Agent (tier chosen by operator class) implements the hypothesis inside the worktree only; while a campaign runs, the guard hook denies edits anywhere else, and, when the campaign sets `scope_paths`, edits inside the worktree that fall outside them. On completion the harness:
 
-1. `sb submit <id>` commits the worktree and checks integrity: the diff touches no frozen path, no protected path, no `.strictlybetter/` state, the eval hash is unchanged, and no dependency manifest changed unless the operator is `dependency`. A violation fails the submit (the experiment can only be discarded); two consecutive violations halt the campaign.
-2. `sb measure <id> --fidelity screen` measures every goal and guardrail from the worktree, with the card's pinned environment plus `SB_FIDELITY=screen` and `SB_METRIC=<id>`.
+1. `sb submit <id>` commits the worktree and checks integrity: the diff touches no frozen path, no protected path, no `.strictlybetter/` state, no file outside `scope_paths` when they are set (`scope:<file>`), the eval hash is unchanged, and no dependency manifest changed unless the operator is `dependency`. A violation fails the submit (the experiment can only be discarded); two consecutive violations halt the campaign.
+2. `sb measure <id> --fidelity screen` measures every goal and guardrail from the worktree, with the card's pinned environment plus `SB_FIDELITY=screen` and `SB_METRIC=<id>`; the campaign's `services` are brought up first when declared, and a setup failure or readiness timeout makes every card invalid.
 3. Appends the results to the ledger (`measure` event).
 
 The experimenter sees its screening numbers. It does not see holdout values, confirmation numbers, or other in-flight experiments.
@@ -100,7 +100,7 @@ Three parts, all harness-driven.
 
 **Judgment**: for promoted candidates only, the `judge` agent is invoked blind. `sb judge-payload <id>` composes its input file in `inbox/`: the diff, the pre-registration, the screen comparisons, the metric cards' `gaming_risks`, the frozen paths, and the checklist path. It does not receive the experimenter's reasoning or conversation; the payload has no field for them. It answers with a fixed JSON verdict stored by `sb judge-verdict <id> --file`: `clean`, `suspicious` (with the pattern named and a `recommended_check`), or `gamed`. The engine rejects any field outside `verdict`, `pattern`, `evidence`, `recommended_check`. `suspicious` raises the confirmation repeats to the card's `max_repeats`; the `recommended_check` (for example, re-run with a fresh fixture) is for the orchestrator or the human, the engine does not execute it. `gamed` makes `sb confirm` refuse the candidate; two consecutive `gamed` verdicts halt the campaign.
 
-Then `sb confirm <id>` runs, from a clean checkout of the experiment commit, `full` fidelity for every card that defines it (a `discard` there ends the candidate) and then `confirm` fidelity with holdout inputs and repeats. Acceptance is decided on confirmation numbers only. Confirmation has three internal outcomes: `accept`, `discard`, and `inconclusive`. Inconclusive (the confirmation median is inside κσ while the screen was outside it) adds up to two repeats per goal per round up to the card's `max_repeats`; still inconclusive is `discard: noise`. The cap exists because "keep measuring until it wins" is the adaptive querying the Ladder guards against; the campaign's false-promotion budget (`05-cost-and-speed.md` §5.8) counts every promoted candidate that is then discarded, which includes every confirmation that ended inconclusive.
+Then `sb confirm <id>` runs, from a clean checkout of the experiment commit, `full` fidelity for every card that defines it (a `discard` there ends the candidate) and then `confirm` fidelity with holdout inputs and repeats. With the `paired` wall on (the default) the campaign head is checked out into a second worktree and measured interleaved with the candidate, ABBA per repeat, and the candidate is compared against that fresh head median rather than the stored baseline (`04-anti-overfitting.md` §4.2). Acceptance is decided on confirmation numbers only. Confirmation has three internal outcomes: `accept`, `discard`, and `inconclusive`. Inconclusive (the confirmation median is inside κσ while the screen was outside it) adds up to two repeats per goal per round up to the card's `max_repeats`; still inconclusive is `discard: noise`. The cap exists because "keep measuring until it wins" is the adaptive querying the Ladder guards against; the campaign's false-promotion budget (`05-cost-and-speed.md` §5.8) counts every promoted candidate that is then discarded, which includes every confirmation that ended inconclusive.
 
 ### COMMIT or DISCARD
 

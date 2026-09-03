@@ -1,5 +1,90 @@
 # Changelog
 
+## 1.1.0 — 2026-09-03 · multi-repo, monorepo scope, services, paired confirmation
+
+The unit of a campaign stays one repository. This release fits that unit to the layouts real
+projects have: the harness in a sibling repo, one package of a monorepo, a service the measurement
+needs. `docs/07-universality.md` §7.7 is the spec and states the recommended shape: one campaign
+per repo; every other repo is an instrument (`external_instruments`) or a service (`services`);
+monorepos run one campaign per package (`scope_paths`); cross-repo atomic experiments are not
+supported and not planned. Confirmation is now paired: the candidate is compared against the
+campaign head measured in the same run, interleaved, instead of a baseline measured when the
+campaign started.
+
+Gates run for this release: <to be filled by the release run>
+
+### Added
+
+- **External instruments** (`external_instruments` in the campaign spec, `integrity.external_paths`
+  on a card): absolute paths outside the repo. `sb campaign start` content-hashes each one (a file by
+  its bytes; a directory recursively, skipping `.git`, `__pycache__`, `node_modules`, `target`,
+  `.venv`, `venv`, `.tox`, `.mypy_cache`, `.pytest_cache`, `dist`, `build`) into
+  `campaign.json["external_hashes"]`; a missing path, or one inside the repo, is an error at start.
+  The hashes are re-checked before every decision (`sb measure` while running, `sb judge`,
+  `sb confirm`, `sb accept`); a mismatch halts with `external-tampered:<path>`. The guard denies
+  edits under an external instrument while a campaign runs. `sb next --json` lists the merged set
+  as `external_instruments`.
+- **Scope** (`scope_paths`): repo-relative patterns. When non-empty, `sb submit` marks a changed file
+  outside them as the integrity violation `scope:<file>` and the guard denies out-of-scope edits inside
+  an experiment worktree. Frozen and protected checks run first and still apply. Empty means the
+  whole repo. `sb next --json` lists `scope_paths`.
+- **Services lifecycle** (`services` in the campaign spec, and the same object as `card.services`):
+  `{setup, ready, teardown, cwd, ready_timeout_s: 120, ready_interval_s: 2, setup_timeout_s: 600,
+  teardown_timeout_s: 300}`. Campaign-level services come up once per measuring command
+  (`sb baseline`, `sb measure`, `sb confirm`, `sb card probe`) around all cards; card-level services
+  around each measurement of that card. `ready` is polled until exit 0 or the timeout; commands run
+  in the checkout (or `cwd` under it) with `SB_CHECKOUT` set to the checkout path. Setup failure or
+  readiness timeout makes the measurement invalid (`discard: invalid`, never a crash); `sb baseline`
+  and `sb card probe` refuse to run instead. Teardown always runs, in a `finally`.
+  `archetypes/service-api.json` carries a `services_hint` with the compose shape.
+- **Paired confirmation** (wall toggle `paired`, default true, the ninth entry in `WALL_KEYS`): at
+  `full` and `confirm` fidelity `sb confirm` checks the campaign head out into a second worktree
+  and measures head and candidate interleaved, ABBA per repeat with the same holdout value on both
+  sides, then compares the candidate's median against the head's fresh median. Sigma still comes
+  from the k-repeat baseline; `k` in the threshold is the fresh head run's valid repeat count;
+  inconclusive rounds add repeats to both sides; an invalid head measurement falls back to the
+  stored baseline. The confirm ledger event gains `paired` and `head_results`; the provenance
+  block prints `paired=yes|no`. This is standard performance-CI practice (rustc-perf measures the
+  baseline in the same job; Chromium Pinpoint runs paired A/B); the bench had shown time drift
+  between baseline and confirmation producing a false accept and a no-op accept on a loaded
+  machine. Cost: confirmation takes about twice as long. The bench's `walls` condition is now all
+  nine walls, and the gaming matrix ablates `paired` like the others.
+- **Selftest**: a second temp repo with a sibling harness directory exercises all three (instrument
+  hashed at start, teardown ran after baseline, baseline measured through the service, guard denies
+  the external instrument and an out-of-scope worktree path and allows an in-scope one, submit flags
+  `scope:`, tampering with the harness halts as `external-tampered`, a service that never becomes
+  ready is `discard: invalid`); the scripted campaign checks that confirmation is paired against
+  the fresh head and that the paired baseline is the fresh head median. 86 checks.
+- Templates (`campaign.json.tmpl`, `card.json.tmpl`) and the shared contracts
+  (`skills/_shared/metric-card.md`, `skills/_shared/ledger.md`) document the fields; `docs/02`,
+  `03`, `07`, `09`, `12` and the README carry the rules.
+
+### Changed
+
+- Review fixes that landed after the 1.0.0 entry was written (the adversarial review's confirmed
+  defects; the 1.0.0 entry below does not list them):
+  - `sb accept` binds to the confirmed commit and requires integrity; `--force` is refused while the
+    confirm wall is on.
+  - The ratchet moves only in the good direction: guardrail floors never drift, sigma stays the
+    baseline's, `secs_per_run` is refreshed, start values are recorded, and the report computes
+    held, improved, and DRIFTED.
+  - Full-level comparisons skip cards without a `full` block.
+  - Holdout rotation re-baselines guardrails too; `sb baseline` honours `walls.holdout`.
+  - Duplicate `METRIC` lines are ambiguous and therefore invalid; `regex:` likewise.
+  - Metric cards are fingerprinted at campaign start and verified before every decision
+    (`card-tampered:<id>`, `card-missing:<id>`); `sb card add` is refused while a campaign is
+    running or halted; a head worse than a ratcheted best halts `campaign start`
+    (`ratchet-regression:<metric>`; `--allow-ratchet-regression` overrides).
+  - The guard keeps the basename of a new file; `frozen-guard.sh` fails closed on an engine error.
+  - Confirm-fidelity `sb measure` is refused while a campaign runs (holdout leakage; `--audit` for
+    a human); `sb ledger view` and `tail` redact a discarded candidate's confirm numbers and
+    `experiments` prints none, `--unredacted` is the audit path.
+  - Dependency manifests are matched by basename; a `gamed` verdict cannot be overwritten.
+  - The Stop driver walks up to find the campaign in a monorepo; the judge protocol's stale
+    composer is removed.
+  - Bench: `apply-failed` is excluded from denominators, tolerant tricks, a goal-regression label;
+    stale results regenerated by the shipped bench.
+
 ## 1.0.0 — 2026-09-03 · first release
 
 The engine, the walls, the cost layer, the knowledge packs, the Claude Code surface, the port
@@ -69,7 +154,7 @@ Benchmark: see bench/results/
   `session-start` prints one line or nothing; `doctor`; `drive --command` runs an external agent
   once per cycle for headless use; `worktree`, `ledger`, `inheritance`, `cost`, `budget`,
   `status`, `report`.
-- **Selftest**: 55 checks, including the AST no-network guard, the version pin to
+- **Selftest**: 86 checks, including the AST no-network guard, the version pin to
   `.claude-plugin/plugin.json`, parser and acceptance-rule fixtures, guard decisions, and a scripted
   four-experiment campaign on an in-memory git repo (real improvement accepted with provenance;
   frozen-path edit refused at submit; no-op discarded as noise and archived; guardrail regression
@@ -200,9 +285,10 @@ Benchmark: see bench/results/
   construction (`prereg` precedes the worktree), not by the toggle; the toggle is inert.
 - The docs describe a drift check at re-baseline, a disk and memory halt, a per-phase cost
   split, judge overhead, a yield curve, and `sb distill --global`. None is in the engine yet.
-- Limited leakage is not enforced: the confirm results of discarded candidates are written to
-  the ledger in full and `sb ledger view` prints them. The brief (`sb next`) surfaces accepted
-  effects only, as designed.
+- Limited leakage is enforced at the CLI, not in the file: the confirm results of discarded
+  candidates are written to the ledger in full; `sb ledger view` and `tail` redact them,
+  `experiments` prints no numbers, and `--unredacted` is the audit path. The brief (`sb next`)
+  surfaces accepted effects only, as designed.
 - The version-pin selftest is skipped when `.claude-plugin/plugin.json` is absent; the manifest
   exists now, so the check runs, and §4 of the release protocol demands its line be printed.
 - The judge's `recommended_check` is stored and never executed; a `suspicious` verdict raises
