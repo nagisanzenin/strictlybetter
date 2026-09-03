@@ -73,6 +73,14 @@ PERM_EXACT_MAX_PAIRS = 20    # exact sign-flip enumeration up to 2^20; Monte Car
 PERM_MC_SAMPLES = 20000
 PERM_MC_SEED = 20260903
 FRONTIER_MAX = 8             # frontier campaigns keep at most this many non-dominated members (crowding-distance pruning)
+AUDIT_EVERY_ACCEPTS = 3      # proxy ladder: the real instrument audits the head at accept 1 and then every N accepts
+AUDIT_DISCARD_RATE = 0.10    # proxy ladder: fraction of proxy discards re-measured on the real instrument (deterministic by id)
+AUDIT_PAIRS = 3              # proxy ladder: interleaved (last-audited, head) pairs per audit; 3 pairs is a direction check
+AUDIT_ALPHA = 0.05
+TRUST_VALIDATE_MIN_AUDITS = 4    # provisional -> validated after this many audited changes ...
+TRUST_VALIDATE_MIN_AGREE = 0.75  # ... with at least this direction agreement and <= 1 false promotion
+TRUST_SUSPECT_WINDOW = 4         # validated -> suspect when >= 2 disagreements in the last N audits (or any false promotion)
+TRUST_DEMOTE_ON_NEXT = True      # suspect -> demoted on the next disagreement
 ANOMALY_MULT = 3.0          # effect > 3x rolling mean of confirmed effects, after plateau
 FP_WINDOW = 10              # false-promotion window (promotions)
 FP_MAX_FRACTION = 0.4
@@ -589,6 +597,14 @@ def validate_card(card: dict) -> None:
             raise SBError(f"card.integrity.{k} must be a list of strings")
     if card.get("targets") is not None and not (isinstance(card["targets"], list) and all(isinstance(x, str) for x in card["targets"])):
         raise SBError("card.targets must be a list of repo-relative paths (the code whose change moves this metric)")
+    if card.get("proxy_for") is not None and not isinstance(card["proxy_for"], str):
+        raise SBError("card.proxy_for must be the id of the real metric's card")
+    if card.get("trust") is not None and card["trust"] not in ("provisional", "validated", "suspect", "demoted"):
+        raise SBError("card.trust must be provisional|validated|suspect|demoted (the engine sets it; a new proxy is provisional)")
+    if card.get("covers") is not None and not (isinstance(card["covers"], list) and all(isinstance(x, str) for x in card["covers"])):
+        raise SBError("card.covers must be a list of repo-relative path patterns the proxy is valid for")
+    if card.get("audit") is not None and not isinstance(card["audit"], dict):
+        raise SBError("card.audit must be an object {every_accepts, discard_sample_rate, pairs, alpha}")
 
 
 def fidelity_spec(card: dict, level: str) -> dict:
@@ -944,7 +960,7 @@ def verify_external(home: Home, c: dict) -> None:
 
 def card_fingerprint(card: dict) -> str:
     """Hash of the measurement-relevant fields of a card (noise/probe/title are free to change)."""
-    core = {k: v for k, v in card.items() if k not in ("noise", "probe", "title", "gaming_risks")}
+    core = {k: v for k, v in card.items() if k not in ("noise", "probe", "title", "gaming_risks", "trust")}
     return sha256_text(json.dumps(core, sort_keys=True))[:16]
 
 
@@ -966,7 +982,7 @@ def frozen_paths(home: Home, campaign: dict | None) -> list:
     pats = []
     if campaign:
         pats += list(campaign.get("frozen_paths") or [])
-        ids = list(campaign.get("goals", [])) + list(campaign.get("guardrails", [])) + list(campaign.get("diagnostics", []))
+        ids = list(campaign.get("goals", [])) + list(campaign.get("guardrails", [])) + list(campaign.get("diagnostics", [])) + list(campaign.get("audits", []) or [])
     else:
         ids = home.list_cards()
     for mid in ids:
@@ -1200,7 +1216,7 @@ def add_spend(c: dict, **kw) -> None:
 
 
 def card_set(home: Home, c: dict) -> dict:
-    ids = list(c.get("goals", [])) + list(c.get("guardrails", [])) + list(c.get("diagnostics", []))
+    ids = list(c.get("goals", [])) + list(c.get("guardrails", [])) + list(c.get("diagnostics", [])) + list(c.get("audits", []) or [])
     return {mid: home.load_card(mid) for mid in ids}
 
 
@@ -1479,6 +1495,12 @@ def cmd_campaign(home: Home, args) -> int:
         home.save_campaign(c)
         for name in os.listdir(home.wt_dir) if os.path.isdir(home.wt_dir) else []:
             worktree_drop(home, name)
+        if c.get("audits") and c.get("head_commit") != c.get("base_commit"):
+            pairs = max(audit_spec(home.load_card(a))["pairs"] for a in c["audits"])
+            run_audit(home, c, "end", c["head_commit"], c["base_commit"], pairs, {}, None)
+            c = home.campaign()
+            c["status"] = "ended"
+            home.save_campaign(c)
         home.ledger_add("campaign", "end", {"reason": args.reason or "manual"})
         write_report(home, c)
         print(f"campaign {c['id']} ended; report at {home.p('reports', c['id'] + '.md')}")
@@ -1532,13 +1554,28 @@ def campaign_start(home: Home, args) -> int:
     for mid in ratchet:
         if mid not in goals and mid not in guardrails and os.path.exists(home.card_path(mid)) and not ratchet[mid].get("demoted"):
             guardrails.append(mid)
-    for mid in goals + guardrails + diagnostics:
+    audits = list(spec.get("audits") or [])
+    for mid in goals + guardrails + diagnostics + audits:
         home.load_card(mid)
+    for mid in audits:
+        ac = home.load_card(mid)
+        if not isinstance(ac.get("audit"), dict):
+            raise SBError(f"audit card {mid} needs an `audit` object (every_accepts, discard_sample_rate, pairs, alpha)")
+        if mid in goals or mid in guardrails:
+            raise SBError(f"audit card {mid} is measured only by audits; list its proxies as goals instead")
+    for mid in goals + guardrails:
+        pc = home.load_card(mid)
+        if pc.get("proxy_for") and pc["proxy_for"] not in audits:
+            raise SBError(f"{mid} is a proxy for {pc['proxy_for']}, which is not in the campaign's `audits` list")
+        if pc.get("proxy_for") and pc.get("trust") in (None, ""):
+            pc["trust"] = "provisional"
+            home.save_card(pc)
     commit = git(["rev-parse", "HEAD"], home.repo)
     branch = spec.get("branch") or f"sb/{cid}"
     c = {
         "id": cid, "goals": goals, "guardrails": guardrails, "diagnostics": diagnostics,
         "composition": spec.get("composition", "pareto"), "oec_weights": spec.get("oec_weights") or {},
+        "audits": audits, "last_audit_commit": commit, "audit_history": [], "proxy_fidelity": {}, "accepts_since_audit": 0, "audit_wall_s": 0.0,
         "budget": spec.get("budget") or {"experiments": 40}, "spent": {"experiments": 0, "wall_s": 0.0, "dollars": 0.0, "tokens_in": 0, "tokens_out": 0},
         "plateau_patience": int(spec.get("plateau_patience", PATIENCE)), "protected_paths": list(spec.get("protected_paths") or []),
         "frozen_paths": list(spec.get("frozen_paths") or []), "branch": branch, "status": "running", "halt_reason": None,
@@ -1578,7 +1615,7 @@ def campaign_start(home: Home, args) -> int:
     home.ledger_add("campaign", "start", {"id": cid, "goals": goals, "guardrails": guardrails, "walls": walls, "commit": commit, "eval_hash": c["eval_hash"]})
     # baseline for metrics lacking one at this commit
     b = home.baseline()
-    missing = [m for m in goals + guardrails + diagnostics if not b.get(m) or b[m].get("commit") != commit]
+    missing = [m for m in goals + guardrails + diagnostics + audits if not b.get(m) or b[m].get("commit") != commit]
     if missing and not args.no_baseline:
         print(f"baselining {len(missing)} metric(s) at {commit[:8]} ...")
         ns = argparse.Namespace(metric=None, repeats=args.repeats, levels=None)
@@ -1634,7 +1671,7 @@ def campaign_start(home: Home, args) -> int:
                               f"raise repeats (-k / confirm.repeats), reduce machine load, or pass --allow-unusable. Campaign halted.")
     # freeze the cards and record start values; a regressed HEAD may not silently become a floor
     c3 = home.campaign()
-    c3["card_hashes"] = {m: card_fingerprint(home.load_card(m)) for m in goals + guardrails + diagnostics}
+    c3["card_hashes"] = {m: card_fingerprint(home.load_card(m)) for m in goals + guardrails + diagnostics + audits}
     c3["start_values"] = {m: (b.get(m) or {}).get("best") for m in goals + guardrails + diagnostics}
     if spec.get("composition") == "frontier":
         if len(goals) < 2:
@@ -1701,6 +1738,17 @@ def cmd_prereg(home: Home, args) -> int:
     for m in h["predicted"]:
         if m not in c["goals"] + c["guardrails"] + c["diagnostics"]:
             raise SBError(f"predicted metric {m!r} is not in the campaign")
+    if c.get("audits"):
+        covering = []
+        for g in c["goals"]:
+            gc = home.load_card(g)
+            if gc.get("proxy_for") and gc.get("trust") != "demoted":
+                cov = gc.get("covers") or []
+                if not cov or matches_any(str(h["target"]).split(":")[0], cov):
+                    covering.append(g)
+        if not covering:
+            raise SBError(f"no confirming proxy covers target {h['target']!r} (each proxy's `covers` names the paths it is valid for); "
+                          f"pick a target inside a proxy's scope or add a slice proxy with no `covers`")
     eid = f"e{c['next_id']:04d}"
     c["next_id"] += 1
     add_spend(c, experiments=1)  # budget updated before work starts
@@ -2237,6 +2285,18 @@ def cmd_accept(home: Home, args) -> int:
     worktree_drop(home, eid)
     home.save_campaign(c)
     home.ledger_add(eid, "accept", {"reason": "forced" if args.force else "confirmed", "accepted_commit": new_commit, "branch": c["branch"]})
+    # proxy ladder: audit the head on the real instrument at the first accept and then every N accepts
+    if c.get("audits"):
+        c["accepts_since_audit"] = int(num(c.get("accepts_since_audit", 0))) + 1
+        every = min(audit_spec(home.load_card(a))["every_accepts"] for a in c["audits"])
+        pairs = max(audit_spec(home.load_card(a))["pairs"] for a in c["audits"])
+        first = len(c["accepted_ids"]) == 1
+        if first or c["accepts_since_audit"] >= every:
+            home.save_campaign(c)
+            rec_audit = run_audit(home, c, "accept", new_commit, c["last_audit_commit"], pairs, proxies_claim(c, r), eid)
+            c = home.campaign()
+            print(json.dumps({"audit": {k: {kk: vv for kk, vv in v.items() if kk in ("verdict", "p", "n_pairs", "median_improvement")} for k, v in rec_audit["metrics"].items()}, "wall_s": rec_audit["wall_s"]}))
+        home.save_campaign(c)
     # holdout rotation
     if c.get("walls", {}).get("holdout", True) and c["acceptances_since_rotation"] >= HOLDOUT_ROTATE_AFTER:
         rotate_holdout(home, c)
@@ -2577,6 +2637,140 @@ def accept_frontier(home: Home, c: dict, r: dict, conf: dict, exp_commit: str, p
     return 0
 
 
+def audit_spec(card: dict) -> dict:
+    a = card.get("audit") or {}
+    return {"every_accepts": int(num(a.get("every_accepts", AUDIT_EVERY_ACCEPTS), AUDIT_EVERY_ACCEPTS)),
+            "discard_sample_rate": float(num(a.get("discard_sample_rate", AUDIT_DISCARD_RATE), AUDIT_DISCARD_RATE)),
+            "pairs": int(num(a.get("pairs", AUDIT_PAIRS), AUDIT_PAIRS)), "alpha": float(num(a.get("alpha", AUDIT_ALPHA), AUDIT_ALPHA))}
+
+
+def run_audit(home: Home, c: dict, kind: str, commit: str, against: str, pairs: int, proxies_said: dict, eid: str | None = None) -> dict:
+    """Measure the real instrument(s) on `commit` against `against`, interleaved, `pairs` pairs, and
+    compare with what the proxies said. kind: accept | discard | end. Returns the audit record."""
+    cards = card_set(home, c)
+    wt_a = worktree_new(home, "_audit-a", against)
+    wt_b = worktree_new(home, "_audit-b", commit)
+    rec = {"kind": kind, "commit": commit, "against": against, "pairs": pairs, "experiment": eid, "at": now_iso(), "metrics": {}, "wall_s": 0.0}
+    t0 = time.perf_counter()
+    try:
+        for mid in c.get("audits") or []:
+            card = cards[mid]
+            sp = audit_spec(card)
+            sc, sh = measure_paired(home, card, "confirm", wt_b, wt_a, pairs, c, True)
+            d = paired_diffs(card, sc, sh)
+            t = paired_randomization_test(d, "greater") if d else {"p": None, "stat": None, "n": 0}
+            med = statistics.median(d) if d else None
+            if not d:
+                verdict = "invalid"
+            elif t["p"] is not None and t["p"] <= sp["alpha"] and med > 0:
+                verdict = "confirmed"
+            elif med is not None and med > 0 and all(x > 0 for x in d):
+                verdict = "direction"          # every pair agrees, but too few pairs for alpha
+            elif med is not None and med < 0 and all(x < 0 for x in d):
+                verdict = "worse"
+            else:
+                verdict = "no-change"
+            rec["metrics"][mid] = {"verdict": verdict, "p": t.get("p"), "n_pairs": t.get("n"), "median_improvement": med,
+                                   "head_median": sc.get("median"), "against_median": sh.get("median"), "alpha": sp["alpha"], "unit": card.get("unit")}
+    finally:
+        worktree_drop(home, "_audit-a")
+        worktree_drop(home, "_audit-b")
+        rec["wall_s"] = round(time.perf_counter() - t0, 1)
+        c["audit_wall_s"] = num(c.get("audit_wall_s", 0.0)) + rec["wall_s"]
+        add_spend(c, wall_s=rec["wall_s"])
+    # proxy fidelity: compare the proxies' claim with the real verdict, per proxy
+    for pid, said in (proxies_said or {}).items():
+        if pid.endswith("__delta"):
+            continue
+        real_id = home.load_card(pid).get("proxy_for")
+        if real_id not in rec["metrics"]:
+            continue
+        real = rec["metrics"][real_id]["verdict"]
+        pf = c.setdefault("proxy_fidelity", {}).setdefault(pid, {"audits": 0, "agree": 0, "false_promotions": 0, "misses": 0, "history": [], "exchange_rates": []})
+        agree = None
+        if said == "better":
+            agree = real in ("confirmed", "direction")
+            if real in ("worse", "no-change"):
+                pf["false_promotions"] += 1
+        elif said == "not-better":
+            agree = real in ("worse", "no-change")
+            if real in ("confirmed", "direction"):
+                pf["misses"] += 1
+        if agree is not None:
+            pf["audits"] += 1
+            pf["agree"] += 1 if agree else 0
+            pf["history"].append(1 if agree else 0)
+            pf["history"] = pf["history"][-20:]
+            if agree and said == "better" and proxies_said.get(pid + "__delta") and rec["metrics"][real_id].get("median_improvement"):
+                try:
+                    pf["exchange_rates"].append(float(rec["metrics"][real_id]["median_improvement"]) / float(proxies_said[pid + "__delta"]))
+                except (TypeError, ZeroDivisionError, ValueError):
+                    pass
+            rec.setdefault("proxies", {})[pid] = {"said": said, "agree": agree}
+            update_trust(home, c, pid, pf)
+    c.setdefault("audit_history", []).append(rec)
+    if kind in ("accept", "end"):
+        c["last_audit_commit"] = commit
+        c["accepts_since_audit"] = 0
+        # the real metric's ratchet moves only here, and only forward
+        b = home.baseline()
+        ratchet = home.ratchet()
+        for mid, m in rec["metrics"].items():
+            if m["verdict"] in ("confirmed", "direction") and m.get("head_median") is not None:
+                e = b.setdefault(mid, {"levels": {}})
+                e.setdefault("levels", {}).setdefault("confirm", {})["median"] = m["head_median"]
+                e["best"] = m["head_median"]
+                e["commit"] = commit
+                e["audited"] = True
+                ratchet[mid] = {"best": m["head_median"], "sigma": e.get("sigma"), "commit": commit, "campaign": c["id"], "direction": cards[mid]["direction"], "audited": True, "audit_verdict": m["verdict"]}
+        home.save_baseline(b)
+        home.save_ratchet(ratchet)
+    home.save_campaign(c)
+    home.ledger_add(eid or "campaign", "audit", rec)
+    return rec
+
+
+def update_trust(home: Home, c: dict, pid: str, pf: dict) -> None:
+    card = home.load_card(pid)
+    trust = card.get("trust") or "provisional"
+    hist = pf.get("history") or []
+    recent = hist[-TRUST_SUSPECT_WINDOW:]
+    new = trust
+    if trust == "provisional":
+        if pf["audits"] >= TRUST_VALIDATE_MIN_AUDITS and (pf["agree"] / max(1, pf["audits"])) >= TRUST_VALIDATE_MIN_AGREE and pf["false_promotions"] <= 1:
+            new = "validated"
+    elif trust == "validated":
+        if (len(recent) >= 2 and recent.count(0) >= 2) or (hist and hist[-1] == 0 and pf["false_promotions"] >= 1 and recent.count(0) >= 1 and pf["audits"] > TRUST_VALIDATE_MIN_AUDITS):
+            new = "suspect"
+    elif trust == "suspect":
+        if hist and hist[-1] == 0 and TRUST_DEMOTE_ON_NEXT:
+            new = "demoted"
+        elif len(recent) >= TRUST_SUSPECT_WINDOW and recent.count(0) == 0:
+            new = "validated"
+    if new != trust:
+        card["trust"] = new
+        home.save_card(card)
+        c["card_hashes"][pid] = card_fingerprint(card)   # trust is engine-owned; refresh the fingerprint so the change is not read as tampering
+        home.ledger_add("campaign", "trust", {"proxy": pid, "from": trust, "to": new, "fidelity": {k: v for k, v in pf.items() if k != "history"}})
+        if new == "demoted":
+            remaining = [g for g in c["goals"] if g != pid and (home.load_card(g).get("trust") != "demoted")]
+            if not remaining:
+                halt(home, c, f"proxy-demoted:{pid}:no-confirming-proxy-left")
+
+
+def proxies_claim(c: dict, r: dict) -> dict:
+    """What each proxy goal said about this experiment at confirmation."""
+    out = {}
+    conf = r.get("confirm") or {}
+    for comp in (conf.get("comparisons") or []) if isinstance(conf, dict) else []:
+        if comp.get("id") in c["goals"]:
+            improved = bool(comp.get("improved"))
+            out[comp["id"]] = "better" if improved else "not-better"
+            if comp.get("delta") is not None:
+                out[comp["id"] + "__delta"] = comp["delta"]
+    return out
+
+
 def gap_ratio(screen_eff, conf_eff) -> float | None:
     if screen_eff is None or conf_eff is None or screen_eff <= 0:
         return None
@@ -2635,6 +2829,15 @@ def cmd_discard(home: Home, args) -> int:
     bandit_update(home, r.get("operator", "config"), False, None, float((r.get("cost") or {}).get("wall_s", 0.0)))
     home.save_campaign(c)
     home.ledger_add(eid, "discard", {"reason": reason, "archived": archived, "archive_key": f"{r.get('operator')}|{r.get('target')}" if archived else None})
+    # proxy ladder: a pre-registered fraction of proxy discards is re-measured on the real instrument (deterministic by id)
+    if c.get("audits") and c.get("status") == "running" and r.get("commit") and r.get("integrity_ok") and reason.split(":")[0] in ("noise", "regression"):
+        rate = max(audit_spec(home.load_card(a))["discard_sample_rate"] for a in c["audits"])
+        draw = int(hashlib.sha256(f"{c['id']}:{eid}".encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+        if draw < rate:
+            said = proxies_claim(c, r) or {g: "not-better" for g in c["goals"]}
+            said = {k: ("not-better" if not k.endswith("__delta") else v) for k, v in said.items()}
+            run_audit(home, c, "discard", r["commit"], r.get("base_commit") or c["last_audit_commit"], 1, said, eid)
+            print(json.dumps({"discard_audit": "sampled", "id": eid}))
     print(json.dumps({"id": eid, "discarded": True, "reason": reason, "archived": archived, "exploration_level": c.get("exploration_level")}))
     return 0
 
@@ -2713,6 +2916,10 @@ def stats(home: Home, c: dict) -> dict:
         "since_last_accept": int(num(c.get("since_last_accept", 0))), "exploration_level": int(num(c.get("exploration_level", 0))),
         "alpha_campaign": c.get("alpha"), "alpha_test": c.get("alpha_test"), "multiplicity": c.get("multiplicity"),
         "confirmations_run": sum(1 for r in recs if r.get("confirm")),
+        "iterations_per_hour": (round(3600.0 * n / wall, 2) if wall > 0 else None),
+        "accepts_per_hour": (round(3600.0 * len(accepted) / wall, 2) if wall > 0 else None),
+        "audit_wall_s": round(num(c.get("audit_wall_s", 0.0)), 1), "audits_run": len(c.get("audit_history") or []),
+        "proxy_fidelity": {k: {kk: vv for kk, vv in v.items() if kk != "history"} for k, v in (c.get("proxy_fidelity") or {}).items()},
         "expected_false_accepts_upper": (round(float(c.get("alpha_test") or 0) * sum(1 for r in recs if r.get("confirm")), 4) if c.get("alpha_test") else None),
         "budget_left": budget_left(c), "budget_exhausted": budget_exhausted(c),
     }
@@ -2883,6 +3090,27 @@ def write_report(home: Home, c: dict) -> str:
             lines.append(f"| {m['id']} | {m.get('parent') or '-'} | `{m['commit'][:10]}` | " + " | ".join(str(m['values'].get(g)) for g in c["goals"]) + f" | {st} |")
         lines.append("")
         lines.append("Each member beat its parent on at least one goal by the exact paired test; membership (non-dominance) is decided on stored confirm medians with the noise-floor margins and carries no error-rate claim. The global ratchet is not written by a frontier campaign.")
+    if c.get("audits"):
+        lines += ["", "## Audited real metrics (the proxy ladder)", "", "The goals above are proxies; the guarantee applies to them. The real instrument was run only at audits; the real metric's ratchet moves only on an audit.", "",
+                  "| audit | kind | commit | against | " + " | ".join(c["audits"]) + " | pairs | wall s |", "|---|---|---|---|" + "---|" * len(c["audits"]) + "---|---|"]
+        for i, a in enumerate(c.get("audit_history") or [], 1):
+            cells = []
+            for mid in c["audits"]:
+                m = (a.get("metrics") or {}).get(mid) or {}
+                cells.append(f"{m.get('against_median')} → {m.get('head_median')} ({m.get('verdict')}, p={m.get('p')})")
+            lines.append(f"| {i} | {a.get('kind')} | `{str(a.get('commit'))[:10]}` | `{str(a.get('against'))[:10]}` | " + " | ".join(cells) + f" | {a.get('pairs')} | {a.get('wall_s')} |")
+        lines += ["", "| proxy | trust | audits | agree | false promotions | misses | exchange rate (real Δ / proxy Δ, median) |", "|---|---|---|---|---|---|---|"]
+        for pid in c["goals"]:
+            pc = home.load_card(pid)
+            if pc.get("proxy_for"):
+                pf = (c.get("proxy_fidelity") or {}).get(pid) or {}
+                xr = pf.get("exchange_rates") or []
+                lines.append(f"| {pid} | {pc.get('trust')} | {pf.get('audits', 0)} | {pf.get('agree', 0)} | {pf.get('false_promotions', 0)} | {pf.get('misses', 0)} | {round(statistics.median(xr), 3) if xr else 'n/a'} |")
+        would = 0.0
+        for a in c["audits"]:
+            lv = (b.get(a) or {}).get("levels", {}).get("confirm") or {}
+            would += float(lv.get("secs_per_run") or 0.0) * 2 * CONFIRM_REPEATS * max(1, s["promoted"])
+        lines.append(f"\nLadder efficiency: real-instrument time spent on audits {s.get('audit_wall_s')} s; confirming every promoted candidate on the real instrument would have cost about {round(would)} s.")
     lines += ["", "## Guardrails", "", "| metric | direction | start | now | status |", "|---|---|---|---|---|"]
     for mid in c["guardrails"]:
         e = b.get(mid) or {}
@@ -2900,7 +3128,7 @@ def write_report(home: Home, c: dict) -> str:
         lines.append(f"| {mid} | {card['direction']} | {sv} | {nv} | {status} |")
     lines += ["", "## Cost", "", f"- experiments: {s['experiments']} (promoted {s['promoted']}, accepted {s['accepted']}, discarded {s['discarded']})",
               f"- discard reasons: {s['discard_reasons']}", f"- wall-clock charged (measurement plus experimenter time reported via `sb cost`): {s['wall_s']} s", f"- dollars: {s['dollars_est']} (estimated from reported tokens at the campaign's pricing table" + (f"; {s['dollars_unknown_experiments']} experiment(s) reported no tokens, so the total is unknown" if s.get('dollars_unknown_experiments') else "") + ")",
-              f"- per accepted improvement: {s['wall_s_per_accept']} s, ${s['dollars_per_accept']}", f"- false promotions: {s['false_promotions']} (window rate {s['false_promotion_rate_window']})",
+              f"- per accepted improvement: {s['wall_s_per_accept']} s, ${s['dollars_per_accept']}", f"- iterations per hour: {s.get('iterations_per_hour')} (accepts per hour {s.get('accepts_per_hour')})", f"- false promotions: {s['false_promotions']} (window rate {s['false_promotion_rate_window']})",
               f"- holdout gap (mean of last 5 accepted): {s['holdout_gap_mean_last5']}",
               f"- acceptance test: exact paired sign-flip, one-sided; family-wise alpha {s.get('alpha_campaign')} ({s.get('multiplicity')} over the pre-registered budget) → per-confirmation alpha {s.get('alpha_test')}; confirmations run {s.get('confirmations_run')}; expected false accepts if every candidate were null: ≤ {s.get('expected_false_accepts_upper')}", f"- walls: {', '.join(k for k, v in c.get('walls', {}).items() if v) or 'none (naive)'}", "",
               "## Accepted changes", ""]
@@ -3773,6 +4001,98 @@ def selftest() -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_report(home, argparse.Namespace())
         check("report has the frontier table", "## Frontier" in open(home.p("reports", "fr.md")).read())
+        for name in list(os.listdir(home.wt_dir)):
+            worktree_drop(home, name)
+    # --- proxy ladder: a cheap proxy standing in for a "slow" real instrument
+    with tempfile.TemporaryDirectory() as td:
+        repo = os.path.join(td, "repo")
+        os.makedirs(repo)
+        git(["init", "-q", "-b", "main"], repo)
+        git(["config", "user.email", "t@t"], repo)
+        git(["config", "user.name", "t"], repo)
+        with open(os.path.join(repo, "work.py"), "w") as f:
+            f.write("N = 40\n")
+        with open(os.path.join(repo, "proxy.py"), "w") as f:
+            f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\nprint('METRIC stage_ms=%d' % (work.N + r.randint(0, 1)))\n")
+        with open(os.path.join(repo, "real.py"), "w") as f:
+            f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\nprint('METRIC full_s=%d' % (2 * work.N + r.randint(0, 1)))\n")
+        git(["add", "-A"], repo)
+        git(["commit", "-q", "-m", "base"], repo)
+        home = Home(repo=repo, home=os.path.join(repo, ".strictlybetter"))
+        home.ensure()
+        home.save_card({"id": "stage_ms", "kind": "goal", "direction": "minimize", "unit": "units", "proxy_for": "full_s", "covers": ["work.py"],   # not a time unit: the fake instrument has no wall-clock to diverge from
+                        "measure": {"command": "python3 proxy.py", "parse": "metric-line:stage_ms", "timeout_s": 60},
+                        "fidelity": {"screen": {"repeats": 1}, "confirm": {"repeats": 10, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}},
+                        "integrity": {"frozen_paths": ["proxy.py", "real.py"]}, "gaming_risks": ["x"], "contention_safe": True})
+        home.save_card({"id": "full_s", "kind": "goal", "direction": "minimize", "unit": "units",
+                        "measure": {"command": "python3 real.py", "parse": "metric-line:full_s", "timeout_s": 60},
+                        "fidelity": {"confirm": {"repeats": 3, "holdout": {"kind": "env", "var": "SB_SEED", "values": [11, 12, 13]}}},
+                        "audit": {"every_accepts": 1, "discard_sample_rate": 1.0, "pairs": 3, "alpha": 0.05},
+                        "integrity": {"frozen_paths": ["real.py"]}, "gaming_risks": ["x"], "contention_safe": True})
+        sp = os.path.join(td, "c.json")
+        write_json_atomic(sp, {"id": "pl", "goals": ["stage_ms"], "audits": ["full_s"], "budget": {"experiments": 8}, "walls": {"judge": False}})
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_campaign(home, argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
+        c = home.campaign()
+        check("proxy ladder: audits listed and proxy provisional", c.get("audits") == ["full_s"] and home.load_card("stage_ms").get("trust") == "provisional")
+        check("proxy ladder: real instrument baselined at start", (home.baseline().get("full_s") or {}).get("best") is not None)
+        hp = os.path.join(td, "h.json")
+        write_json_atomic(hp, {"operator": "config", "target": "real.py", "hypothesis": "outside proxy scope", "predicted": {"stage_ms": "-1%"}})
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_prereg(home, argparse.Namespace(file=hp, parent=None))
+            check("proxy ladder: target outside every proxy's covers is refused", False)
+        except SBError:
+            check("proxy ladder: target outside every proxy's covers is refused", True)
+        def run_pl(n_new, hyp, extra=""):
+            write_json_atomic(hp, {"operator": "config", "target": "work.py", "hypothesis": hyp, "predicted": {"stage_ms": "-1..50%"}})
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                cmd_prereg(home, argparse.Namespace(file=hp, parent=None))
+            info = json.loads(out.getvalue())
+            with open(os.path.join(home.wt_dir, info["id"], "work.py"), "w") as f:
+                f.write(f"N = {n_new}\n{extra}")
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_submit(home, argparse.Namespace(id=info["id"]))
+                cmd_measure(home, argparse.Namespace(id=info["id"], fidelity="screen", repeats=None, keep_runs=False, audit=False))
+                cmd_judge(home, argparse.Namespace(id=info["id"], fidelity="screen"))
+            rr = home.experiments()[info["id"]]
+            if rr["judge_stat"]["verdict"] == "promote":
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cmd_confirm(home, argparse.Namespace(id=info["id"], force=False))
+                rr = home.experiments()[info["id"]]
+                if rr["confirm"]["verdict"] == "accept":
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        cmd_accept(home, argparse.Namespace(id=info["id"], force=False))
+                    return info["id"], "accept"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cmd_discard(home, argparse.Namespace(id=info["id"], reason="noise", archive=False))
+                return info["id"], "discard-confirm"
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_discard(home, argparse.Namespace(id=info["id"], reason="noise", archive=False))
+            return info["id"], "discard-screen"
+        e1, res1 = run_pl(30, "real win (proxy and real agree)")
+        c = home.campaign()
+        check("proxy ladder: first accept triggers an audit", res1 == "accept" and len(c.get("audit_history") or []) == 1 and c["audit_history"][0]["kind"] == "accept")
+        a1 = c["audit_history"][0]["metrics"]["full_s"]
+        check("proxy ladder: audit compares head vs last audited commit on the real instrument", a1["verdict"] in ("confirmed", "direction") and a1["n_pairs"] == 3)
+        check("proxy ladder: real ratchet moves only on audit", (home.ratchet().get("full_s") or {}).get("audited") is True and home.ratchet()["full_s"]["best"] < 81)
+        pf = c["proxy_fidelity"]["stage_ms"]
+        check("proxy ladder: fidelity recorded (agree)", pf["audits"] == 1 and pf["agree"] == 1)
+        e2, res2 = run_pl(30, "no-op (same N): discard, sampled audit at rate 1.0", extra="# no-op\n")
+        c = home.campaign()
+        check("proxy ladder: discard is audited at the sampled rate", res2.startswith("discard") and any(a["kind"] == "discard" for a in c.get("audit_history") or []))
+        for k in (25, 20, 15):
+            run_pl(k, f"win N={k}")
+        c = home.campaign()
+        check("proxy ladder: trust becomes validated after enough agreeing audits", home.load_card("stage_ms").get("trust") == "validated")
+        check("proxy ladder: card fingerprint tolerates the engine's trust change", home.campaign().get("status") == "running")
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_campaign(home, argparse.Namespace(action="end", file=None, reason="done", no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False, allow_underpowered=False))
+        c = home.campaign()
+        check("proxy ladder: campaign end runs the final audit head vs base", c["audit_history"][-1]["kind"] == "end" and c["audit_history"][-1]["against"] == c["base_commit"])
+        rep_txt = open(home.p("reports", "pl.md")).read()
+        check("proxy ladder: report has the audit table and iterations per hour", "## Audited real metrics" in rep_txt and "iterations per hour" in rep_txt)
         for name in list(os.listdir(home.wt_dir)):
             worktree_drop(home, name)
     failed = [n for n, ok in checks if not ok]
