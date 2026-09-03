@@ -1,0 +1,68 @@
+{
+  "id": "bench_ms",
+  "title": "Benchmark total (ms)",
+  "kind": "goal",
+  "direction": "minimize",
+  "unit": "ms",
+  "measure": {
+    "command": "cargo run --release --bin bench -q",
+    "parse": "metric-line:bench_ms",
+    "cwd": ".",
+    "timeout_s": 600,
+    "env": {
+      "SB_BENCH_SIZE": "30000",
+      "SB_BENCH_REPEATS": "5"
+    },
+    "expected_duration_s": [
+      0.1,
+      300
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "env": {
+        "SB_BENCH_SIZE": "12000",
+        "SB_BENCH_REPEATS": "3"
+      },
+      "repeats": 1
+    },
+    "full": {
+      "repeats": 2
+    },
+    "confirm": {
+      "repeats": 3,
+      "max_repeats": 6,
+      "holdout": {
+        "kind": "env",
+        "var": "SB_SEED",
+        "values": [
+          1913,
+          8241,
+          6607
+        ]
+      }
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 1.0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "src/bin/bench.rs",
+      "tests/",
+      "checks.sh"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='src/lib.rs'; s=open(p).read()\nanchor='pub fn dedupe(items: &[u64]) -> Vec<u64> {\\n'\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns=''+s.replace(anchor,'pub fn dedupe(items: &[u64]) -> Vec<u64> {\\n    std::thread::sleep(std::time::Duration::from_millis(20));\\n',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "bench inputs could be cached by seed",
+    "dedupe or count_words could special-case the benchmark input distribution",
+    "checksum could be faked by hard-coding outputs for the bench seed",
+    "[profile.release] tuning in Cargo.toml changes the number without changing the algorithm; flag for the judge"
+  ],
+  "contention_safe": false,
+  "noise": null
+}

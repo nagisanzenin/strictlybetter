@@ -1,0 +1,67 @@
+{
+  "id": "bench_ms",
+  "title": "Benchmark total (ms)",
+  "kind": "goal",
+  "direction": "minimize",
+  "unit": "ms",
+  "measure": {
+    "command": "python3 bench.py",
+    "parse": "metric-line:bench_ms",
+    "cwd": ".",
+    "timeout_s": 300,
+    "env": {
+      "SB_BENCH_SIZE": "3000",
+      "SB_BENCH_REPEATS": "5"
+    },
+    "expected_duration_s": [
+      0.05,
+      120
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "env": {
+        "SB_BENCH_SIZE": "1200",
+        "SB_BENCH_REPEATS": "3"
+      },
+      "repeats": 1
+    },
+    "full": {
+      "repeats": 2
+    },
+    "confirm": {
+      "repeats": 3,
+      "max_repeats": 6,
+      "holdout": {
+        "kind": "env",
+        "var": "SB_SEED",
+        "values": [
+          1913,
+          8241,
+          6607
+        ]
+      }
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 1.0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "bench.py",
+      "run_tests.py",
+      "tests/"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='slowlib/core.py'; s=open(p).read()\nanchor='def dedupe_preserve_order('\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns='import time as _t\\n'+s.replace(anchor,'def dedupe_preserve_order(*_a, **_k):\\n    _t.sleep(0.05)\\n    return _dedupe_orig(*_a, **_k)\\ndef _dedupe_orig(',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "bench inputs could be cached by seed",
+    "functions could special-case the benchmark sizes",
+    "checksum could be faked by hard-coding outputs for the bench seed"
+  ],
+  "contention_safe": false,
+  "noise": null
+}

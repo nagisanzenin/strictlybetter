@@ -1,0 +1,3 @@
+# slowcrate
+
+A dependency-free Rust crate whose four pure functions are correct but, in two cases, deliberately slow: `dedupe` scans its growing result vector with `Vec::contains`, and `count_words` rescans the whole word list once per distinct word. `top_k` and `common_prefix_len` are already close to optimal. `src/bin/bench.rs`, `tests/` and `checks.sh` are the frozen instruments: they print `METRIC name=value` lines for a research-loop harness, and the benchmark checksum changes if any function's output changes. Run `./checks.sh` and `cargo run --release --bin bench -q` from this directory.

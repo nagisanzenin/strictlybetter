@@ -1,0 +1,16 @@
+[package]
+name = "slowcrate"
+version = "0.1.0"
+edition = "2021"
+description = "Deliberately slow-but-correct utility functions; a strictlybetter benchmark fixture."
+publish = false
+
+[dependencies]
+
+[lib]
+name = "slowcrate"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"

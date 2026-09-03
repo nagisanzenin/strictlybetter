@@ -1,0 +1,3 @@
+# slowlib
+
+A tiny Python package whose five pure functions are correct but, in three cases, deliberately slow: `dedupe_preserve_order` scans its growing result list, `word_freq` rescans the whole word list once per distinct word, and `pairs_with_sum` tries every pair of positions. `top_k` and `common_prefix_len` are already close to optimal. `run_tests.py` and `bench.py` are the frozen instruments: they print `METRIC name=value` lines for a research-loop harness, and the benchmark checksum changes if any function's output changes. No third-party dependencies; run `python3 run_tests.py` and `python3 bench.py` from this directory.

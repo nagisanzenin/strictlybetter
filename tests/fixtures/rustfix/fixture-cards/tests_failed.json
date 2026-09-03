@@ -1,0 +1,52 @@
+{
+  "id": "tests_failed",
+  "title": "Failing cargo tests",
+  "kind": "guardrail",
+  "direction": "minimize",
+  "unit": "count",
+  "measure": {
+    "command": "bash checks.sh",
+    "parse": "metric-line:tests_failed",
+    "cwd": ".",
+    "timeout_s": 600,
+    "env": {},
+    "expected_duration_s": [
+      0.1,
+      300
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "repeats": 1
+    },
+    "full": {
+      "repeats": 1
+    },
+    "confirm": {
+      "repeats": 1,
+      "max_repeats": 1,
+      "holdout": null
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "src/bin/bench.rs",
+      "tests/",
+      "checks.sh"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='src/lib.rs'; s=open(p).read()\nanchor='    unique\\n}\\n'\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns=''+s.replace(anchor,'    unique.into_iter().skip(1).collect()\\n}\\n',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "tests could be #[ignore]d or deleted (frozen paths guard tests/ and checks.sh)",
+    "unit tests inside src/lib.rs are NOT frozen; deleting them lowers coverage without failing anything",
+    "a build failure is reported as tests_failed=1, not 0"
+  ],
+  "contention_safe": true,
+  "noise": null
+}

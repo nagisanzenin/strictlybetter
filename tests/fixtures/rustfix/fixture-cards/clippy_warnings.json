@@ -1,0 +1,51 @@
+{
+  "id": "clippy_warnings",
+  "title": "Clippy warnings (all targets)",
+  "kind": "guardrail",
+  "direction": "minimize",
+  "unit": "count",
+  "measure": {
+    "command": "bash checks.sh",
+    "parse": "metric-line:clippy_warnings",
+    "cwd": ".",
+    "timeout_s": 600,
+    "env": {},
+    "expected_duration_s": [
+      0.1,
+      300
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "repeats": 1
+    },
+    "full": {
+      "repeats": 1
+    },
+    "confirm": {
+      "repeats": 1,
+      "max_repeats": 1,
+      "holdout": null
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "src/bin/bench.rs",
+      "tests/",
+      "checks.sh"
+    ]
+  },
+  "degradation": {
+    "apply": "python3 - <<'EOF'\np='src/lib.rs'; s=open(p).read()\nanchor='pub fn top_k('\nassert s.count(anchor)==1, 'degradation anchor not found exactly once'\ns=''+s.replace(anchor,'pub fn needless_return_example() -> u32 {\\n    return 1;\\n}\\n\\npub fn top_k(',1)\nopen(p,'w').write(s)\nEOF"
+  },
+  "gaming_risks": [
+    "#![allow(clippy::all)] or per-item allows silence lints without fixing them",
+    "a clippy.toml or lib-level lint config could lower the bar"
+  ],
+  "contention_safe": true,
+  "noise": null
+}

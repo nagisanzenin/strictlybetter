@@ -1,0 +1,220 @@
+{
+  "id": "rust-crate",
+  "title": "Rust crate",
+  "match": {
+    "any_files": ["Cargo.toml"],
+    "any_dirs": ["src", "benches"],
+    "languages": ["rust"],
+    "any_deps": []
+  },
+  "confidence_notes": "Cargo.toml at the root is necessary, not sufficient. A workspace root with only [workspace] and no [package] is still rust-crate at lower confidence; pick the member with a bench/ or the largest src/. If Cargo.toml lists axum, actix-web, tonic, hyper or warp and there is a main.rs that binds a port, add service-api. If there is a [[bin]] and a clap/argh dependency but no server, add cli-tool. A crate whose src/ is mostly generated bindings (bindgen, prost) has almost no honest algorithmic headroom; say so in the profile.",
+  "commands": {
+    "build": "cargo build --release",
+    "test": "cargo test",
+    "lint": "cargo clippy --all-targets",
+    "bench": "cargo bench",
+    "typecheck": "cargo check --all-targets"
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "secrets/", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml", "clippy.toml", ".cargo/config.toml", "deny.toml", "build.rs"],
+  "frozen_paths_hint": ["tests/", "benches/", "fixtures/", "testdata/", "proptest-regressions/", "src/snapshots/"],
+  "default_cards": [
+    {
+      "id": "tests_failed",
+      "title": "Failing tests (unit + integration + doctests)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "out=$(cargo test 2>&1); rc=$?; f=$(printf '%s\\n' \"$out\" | awk '/^test result:/{for(i=1;i<=NF;i++) if($i==\"failed;\") n+=$(i-1)} END{print n+0}'); [ \"$rc\" -ne 0 ] && [ \"$f\" -eq 0 ] && f=1; echo \"METRIC tests_failed=$f\"",
+        "parse": "metric-line:tests_failed",
+        "cwd": ".",
+        "timeout_s": 1200,
+        "env": {"CARGO_INCREMENTAL": "0", "RUST_BACKTRACE": "0"},
+        "expected_duration_s": [1, 1200]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["tests/", "benches/", "fixtures/", "testdata/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(fn {{tested_function}}[^{]*\\{)/$1 if std::env::var(\"SB_NEVER\").is_err() { panic!(\"sb-degradation\"); }/' {{impl_file}}", "expected": "worse"},
+      "gaming_risks": ["a test module deleted, #[ignore]d, or gated behind a cfg the runner never enables", "assertions weakened or wrapped in a Result that is never checked", "a failing test's body replaced by a trivially passing one in a non-frozen path", "cargo test filtered via .cargo/config.toml aliases or an env var so the failing test is never collected", "build failure reads as one failure: a run that compiles nothing is not a pass"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "clippy_warnings",
+      "title": "Clippy warnings, all targets",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "out=$(cargo clippy --all-targets --message-format=short 2>&1) || { printf '%s\\n' \"$out\" >&2; exit 1; }; printf '%s\\n' \"$out\" | awk '/^[^ ]+:[0-9]+:[0-9]+: warning:/{n++} END{print \"METRIC clippy_warnings=\" n+0}'",
+        "parse": "metric-line:clippy_warnings",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CARGO_INCREMENTAL": "0"},
+        "expected_duration_s": [1, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["clippy.toml"]},
+      "degradation": {"apply": "printf '\\npub fn sb_degradation(v: &Vec<u8>) -> usize { v.len() }\\n' >> src/lib.rs", "expected": "worse"},
+      "gaming_risks": ["#![allow(clippy::...)] or #[allow] attributes added to silence rather than fix", "clippy.toml thresholds raised (protected path, but check the diff for an inline equivalent)", "a warning-heavy module moved behind a cfg that --all-targets does not enable", "lint level demoted in Cargo.toml [lints] table"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "build_release_s",
+      "title": "Release compile time of this crate, deps cached",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "s",
+      "measure": {
+        "command": "cargo clean -p {{crate_name}} --release >/dev/null 2>&1; /usr/bin/time -p cargo build --release --quiet 2>&1",
+        "parse": "regex:real (\\d+\\.\\d+)",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"CARGO_INCREMENTAL": "0", "CARGO_BUILD_JOBS": "{{jobs}}"},
+        "expected_duration_s": [2, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 3}, "confirm": {"repeats": 3, "max_repeats": 6}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "python3 -c \"print('\\n'.join('pub fn sb_bloat_%d(x: u64) -> u64 { let mut v: Vec<u64> = (0..x).collect(); v.sort_unstable(); v.iter().map(|y| y.wrapping_mul(%d)).sum() }' % (i, i + 1) for i in range(3000)))\" >> src/lib.rs", "expected": "worse"},
+      "gaming_risks": ["code deleted or moved into a dependency crate that cargo clean -p does not touch, so it is measured as cached", "opt-level or codegen-units lowered in Cargo.toml [profile.release] (that is a config-operator change and must be declared as one)", "generic code replaced by dyn dispatch that compiles faster but is slower at runtime: check the bench guardrail moved", "features disabled so less of the crate compiles", "a proc-macro or build.rs made lazy in a way that skips work only when SB_* env vars are present"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "binary_bytes",
+      "title": "Release binary size",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "bytes",
+      "measure": {
+        "command": "cargo build --release --message-format=json-render-diagnostics 2>/dev/null | python3 -c 'import json,sys,os; p=[m.get(\"executable\") for m in map(json.loads, sys.stdin) if m.get(\"reason\")==\"compiler-artifact\" and m.get(\"executable\")]; print(\"METRIC binary_bytes=%d\" % os.path.getsize(p[-1]))'",
+        "parse": "metric-line:binary_bytes",
+        "cwd": ".",
+        "timeout_s": 1800,
+        "env": {"CARGO_INCREMENTAL": "0"},
+        "expected_duration_s": [0.5, 1800]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "printf '\\n#[used]\\npub static SB_DEGRADATION: [u8; 1048576] = [7; 1048576];\\n' >> src/lib.rs", "expected": "worse"},
+      "gaming_risks": ["strip = true, lto, opt-level = \"z\" or panic = \"abort\" set in [profile.release]: legitimate only as a declared config hypothesis, and panic=abort changes semantics", "features or whole subcommands removed", "debug info stripped while the profile said it should be kept", "the measured binary swapped for a smaller [[bin]] target: the parser takes the last artifact, so check which executable was built", "a large table moved from the binary into a file read at runtime"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "bench_ns",
+      "title": "Criterion bench {{bench_filter}}, ns per iteration",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "ns/iter",
+      "measure": {
+        "command": "cargo bench --bench {{bench_name}} -- --output-format bencher --warm-up-time 3 --measurement-time 10 '{{bench_filter}}'",
+        "parse": "regex:{{bench_filter}}\\s+\\.\\.\\. bench:\\s+(\\d+) ns/iter",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CARGO_INCREMENTAL": "0"},
+        "expected_duration_s": [15, 900]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "cargo bench --bench {{bench_name}} -- --output-format bencher --warm-up-time 1 --measurement-time 2 '{{bench_filter}}'", "expected_duration_s": [4, 300]},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 6, "holdout": {"kind": "env", "var": "SB_SEED", "values": [1913, 8241, 6607]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["benches/", "fixtures/", "testdata/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(fn {{hot_function}}[^{]*\\{)/$1 std::thread::sleep(std::time::Duration::from_micros(50));/' {{hot_file}}", "expected": "worse"},
+      "gaming_risks": ["the hot function special-cases the fixture's size, shape, or a sentinel value the bench supplies", "a result cache keyed on the exact input the bench passes, warm on the second iteration", "work deferred out of the measured closure (lazy evaluation that the bench never forces)", "black_box removed or the bench's input built once outside the loop in a non-frozen helper", "SIMD or unsafe fast path only correct for the fixture's alignment; correctness lives in the tests guardrail, check it ran", "the bench reads SB_SEED: if it does not, the holdout is a no-op and the metrologist must switch to a dir holdout"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "unsafe_count",
+      "title": "Occurrences of the unsafe keyword under src/",
+      "kind": "diagnostic",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "printf 'METRIC unsafe_count=%s\\n' \"$(grep -rhow 'unsafe' src --include='*.rs' | wc -l | tr -d ' ')\"",
+        "parse": "metric-line:unsafe_count",
+        "cwd": ".",
+        "timeout_s": 30,
+        "env": {},
+        "expected_duration_s": [0, 10]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "printf '\\npub fn sb_degradation() -> u8 { unsafe { *(&7u8 as *const u8) } }\\n' >> src/lib.rs", "expected": "worse"},
+      "gaming_risks": ["unsafe moved into a dependency crate, a macro, or a file outside src/", "one big unsafe block replacing several small ones (count falls, exposure rises): read the diff, not the number", "the word hidden behind a macro_rules! that expands to unsafe"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "public_api_items",
+      "title": "Public API items (cargo public-api)",
+      "kind": "guardrail",
+      "direction": "equal",
+      "unit": "count",
+      "measure": {
+        "command": "command -v cargo-public-api >/dev/null 2>&1 || exit 3; cargo public-api --simplified 2>/dev/null | grep -c '^pub '",
+        "parse": "regex:^(\\d+)$",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {},
+        "expected_duration_s": [2, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "printf '\\npub fn sb_degradation_api() {}\\n' >> src/lib.rs", "expected": "worse"},
+      "gaming_risks": ["an item made pub(crate) or #[doc(hidden)] to keep the count while breaking downstream users", "one item removed and one added so the count is unchanged: an equal count is necessary, not sufficient; the recommended check is cargo public-api diff against the baseline commit", "a type's fields changed from pub to private (count of items can stay the same)"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "msrv_build_failed",
+      "title": "Builds on the minimum supported Rust version",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "bool",
+      "measure": {
+        "command": "rustup run {{msrv}} rustc --version >/dev/null 2>&1 || exit 3; if cargo +{{msrv}} check --quiet --all-targets 2>/dev/null; then echo METRIC msrv_build_failed=0; else echo METRIC msrv_build_failed=1; fi",
+        "parse": "metric-line:msrv_build_failed",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CARGO_INCREMENTAL": "0"},
+        "expected_duration_s": [1, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["rust-toolchain.toml", "rust-toolchain"]},
+      "degradation": {"apply": "printf '\\npub fn sb_degradation_msrv() -> u32 { let v = [1u32, 2, 3]; v.iter().map(|x| x.isqrt()).sum() }\\n' >> src/lib.rs", "expected": "worse"},
+      "gaming_risks": ["rust-version in Cargo.toml raised (protected via Cargo.toml review, not a frozen path: read the diff)", "the failing code moved behind a feature the MSRV check does not enable"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 3],
+    "algorithmic": [3, 3],
+    "allocation": [3, 3],
+    "caching": [2, 4],
+    "concurrency": [1, 5],
+    "dependency": [1, 6],
+    "test-add": [2, 2],
+    "bugfix": [2, 3],
+    "refactor-enabling": [1, 4],
+    "data": [1, 9],
+    "model": [1, 9],
+    "numerics": [1, 6],
+    "docs": [1, 7]
+  },
+  "noise_sources": ["CPU frequency scaling and thermal throttling on laptops", "incremental compilation cache state (pin CARGO_INCREMENTAL=0)", "shared target/ directory between worktrees: a warm dep cache is intended, a warm crate cache is not (cargo clean -p before timing)", "criterion's own outlier handling hides multimodal timings; read the bencher line, not the summary", "background cargo processes from another worktree (measurement must be serialized)"],
+  "hygiene_guardrails": ["tests_failed", "clippy_warnings"],
+  "notes": "Reuse before inventing: if benches/ exists, every criterion group is a candidate bench_ns card; one card per group, filter by group name. Fill {{crate_name}} from [package].name, {{bench_name}} from [[bench]] or the file stem under benches/, {{bench_filter}} from the criterion function id as printed by --output-format bencher. binary_bytes needs a [[bin]] target; for a library-only crate replace the parser with the .rlib path from the same json stream (filenames[0]). build_release_s and bench_ns are contention_safe=false and must be measured serially; CARGO_TARGET_DIR is shared across worktrees by the harness, which is why the compile-time card runs cargo clean -p first. public_api_items needs cargo-public-api and a nightly toolchain for rustdoc JSON; if absent the command exits 3 and the card is quarantined rather than reading zero. The MSRV card needs the toolchain installed; read {{msrv}} from [package].rust-version. The equal-direction guardrail treats any change as worse for the degradation probe. Compile time plus binary size with clippy and public_api_items as guardrails is the canonical first campaign for a crate without benches."
+}

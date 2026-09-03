@@ -1,0 +1,50 @@
+{
+  "id": "loc",
+  "title": "Lines of code in slowlib",
+  "kind": "diagnostic",
+  "direction": "minimize",
+  "unit": "lines",
+  "measure": {
+    "command": "python3 -c \"import pathlib;print('METRIC loc='+str(sum(len(p.read_text().splitlines()) for p in pathlib.Path('slowlib').glob('*.py'))))\"",
+    "parse": "metric-line:loc",
+    "cwd": ".",
+    "timeout_s": 30,
+    "env": {},
+    "expected_duration_s": [
+      0.01,
+      30
+    ]
+  },
+  "fidelity": {
+    "screen": {
+      "repeats": 1
+    },
+    "full": {
+      "repeats": 1
+    },
+    "confirm": {
+      "repeats": 1,
+      "max_repeats": 1,
+      "holdout": null
+    }
+  },
+  "acceptance": {
+    "kappa": 2.5,
+    "tolerance_sigma": 0
+  },
+  "integrity": {
+    "frozen_paths": [
+      "bench.py",
+      "run_tests.py",
+      "tests/"
+    ]
+  },
+  "degradation": {
+    "apply": "printf '\\n# padding line\\n' >> slowlib/core.py"
+  },
+  "gaming_risks": [
+    "diagnostic only: recorded, never decides acceptance"
+  ],
+  "contention_safe": true,
+  "noise": null
+}

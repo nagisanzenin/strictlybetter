@@ -1,0 +1,202 @@
+{
+  "id": "service-api",
+  "title": "Network service / HTTP API",
+  "match": {
+    "any_files": ["Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yaml", "openapi.yaml", "openapi.json", "Procfile", "fly.toml"],
+    "any_dirs": ["api", "routes", "handlers", "controllers", "cmd"],
+    "languages": ["python", "rust", "go", "typescript", "javascript", "java", "kotlin", "ruby", "elixir"],
+    "any_deps": ["fastapi", "flask", "django", "starlette", "aiohttp", "axum", "actix-web", "tonic", "hyper", "warp", "rocket", "express", "fastify", "koa", "hono", "@nestjs/core", "gin", "echo", "fiber", "chi", "spring-boot", "rails", "phoenix"]
+  },
+  "confidence_notes": "A process that binds a port and answers requests. The signal is a server framework in the manifest plus a Dockerfile, a compose file, an OpenAPI spec, or a main that listens. It stacks with the language archetype (rust-crate, python-package, node-frontend for SSR): keep the language pack's hygiene guardrails and add these latency cards. If the only server is a dev server for a static site, it is node-frontend or docs-site, not this. A CLI that happens to have a --serve flag is cli-tool first. Requires a way to start the service locally with no external dependencies, or a compose file the orienteer can bring up; if the service needs a cloud database the latency cards are unusable on a laptop and the profile must say so.",
+  "commands": {
+    "build": "{{build_command}}",
+    "test": "{{test_command}}",
+    "lint": "{{lint_command}}",
+    "bench": "oha -z 20s -q {{rps}} -c 16 --no-tui -j {{url_base}}{{path}}",
+    "typecheck": null
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "*.key", "*.crt", "secrets/", "Dockerfile", "docker-compose*.yml", "compose*.yaml", "k8s/", "helm/", "terraform/", "migrations/", "openapi.yaml", "openapi.json", "*.lock", "package-lock.json"],
+  "frozen_paths_hint": ["tests/", "test/", "integration/", "contract/", "fixtures/", "load/", "k6/", "testdata/"],
+  "default_cards": [
+    {
+      "id": "tests_failed",
+      "title": "Integration and contract test suite failed (exit status)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "{{test_command}} >/dev/null 2>&1; rc=$?; echo \"METRIC tests_failed=$rc\"",
+        "parse": "metric-line:tests_failed",
+        "cwd": ".",
+        "timeout_s": 1200,
+        "env": {"CI": "1"},
+        "expected_duration_s": [1, 1200]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["tests/", "test/", "integration/", "contract/", "fixtures/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(\\b{{handler_function}}\\b[^\\n]*\\n)/$1{{raise_statement}}\\n/' {{handler_file}}", "expected": "worse"},
+      "gaming_risks": ["a test target narrowed in the language's test config (pytest addopts, cargo aliases, jest testPathIgnorePatterns)", "an integration test made to hit a mock instead of the real handler via a non-frozen fixture", "contract test skipped when the OpenAPI spec is missing: the spec is protected, but a diff that makes the loader tolerant of a missing spec is a tell", "exit status collapses counts: a nonzero value means failing, the number itself is the runner's exit code, not a count"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "p50_s",
+      "title": "Median latency at {{rps}} rps, {{path}}",
+      "kind": "diagnostic",
+      "direction": "minimize",
+      "unit": "s",
+      "measure": {
+        "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 20s -q {{rps}} -c 16 --no-tui -j {{url_base}}{{path}}; rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; exit $rc",
+        "parse": "json:latencyPercentiles.p50",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_LOAD": "1"},
+        "expected_duration_s": [20, 120]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 8s -q {{rps}} -c 16 --no-tui -j {{url_base}}{{path}}; rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; exit $rc", "expected_duration_s": [8, 60]},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 6, "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 20s -q {{rps}} -c 16 --no-tui -j {{url_base}}{holdout}; rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; exit $rc", "holdout": {"kind": "arg", "values": ["{{holdout_path_1}}", "{{holdout_path_2}}"]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["load/", "k6/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(\\b{{handler_function}}\\b[^\\n]*\\n)/$1{{sleep_statement}}\\n/' {{handler_file}}", "expected": "worse"},
+      "gaming_risks": ["a response cache keyed on the exact URL the load generator hits (the holdout paths exist to expose this)", "the handler short-circuits when it sees the load generator's User-Agent, a missing cookie, or the SB_LOAD env var", "work moved after the response is flushed (background task) without the caller's result changing: legitimate only if correctness tests cover the deferred work", "keep-alive or connection settings changed in the load command (frozen load/ dir; the card's own command is outside the write set)", "a smaller response body (fewer fields) that tests do not check"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "p95_s",
+      "title": "p95 latency at {{rps}} rps, {{path}}",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "s",
+      "measure": {
+        "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 20s -q {{rps}} -c 16 --no-tui -j {{url_base}}{{path}}; rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; exit $rc",
+        "parse": "json:latencyPercentiles.p95",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_LOAD": "1"},
+        "expected_duration_s": [20, 120]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 8s -q {{rps}} -c 16 --no-tui -j {{url_base}}{{path}}; rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; exit $rc", "expected_duration_s": [8, 60]},
+        "full": {"repeats": 2},
+        "confirm": {"repeats": 3, "max_repeats": 6, "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 20s -q {{rps}} -c 16 --no-tui -j {{url_base}}{holdout}; rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; exit $rc", "holdout": {"kind": "arg", "values": ["{{holdout_path_1}}", "{{holdout_path_2}}"]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["load/", "k6/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(\\b{{handler_function}}\\b[^\\n]*\\n)/$1{{sleep_statement}}\\n/' {{handler_file}}", "expected": "worse"},
+      "gaming_risks": ["tail latency hidden by rejecting or timing out slow requests (error_rate guardrail must be present and must hold)", "GC or runtime flags changed in the serve command or a dotfile outside the declared config operator", "a warm-up loop in the server that pre-computes exactly the load generator's requests", "thread or worker count raised (a config operator; the RSS guardrail should move if so)", "the p95 of a mostly-cached path: the holdout paths must exercise the same handler with different keys"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "error_rate",
+      "title": "Fraction of 5xx or failed requests under load",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "fraction",
+      "measure": {
+        "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; out=$(oha -z 10s -q {{rps}} -c 16 --no-tui -j {{url_base}}{{path}}); rc=$?; kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; [ $rc -eq 0 ] || exit $rc; printf '%s' \"$out\" | python3 -c 'import json,sys; d=json.load(sys.stdin); sc=d.get(\"statusCodeDistribution\",{}); ed=d.get(\"errorDistribution\",{}); n=sum(sc.values())+sum(ed.values()); bad=sum(v for k,v in sc.items() if int(k)>=500)+sum(ed.values()); print(\"METRIC error_rate=%.5f\" % (bad/max(1,n)))'",
+        "parse": "metric-line:error_rate",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_LOAD": "1"},
+        "expected_duration_s": [10, 90]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 4}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": ["load/", "k6/"]},
+      "degradation": {"apply": "perl -0pi -e 's/(\\b{{handler_function}}\\b[^\\n]*\\n)/$1{{raise_statement}}\\n/' {{handler_file}}", "expected": "worse"},
+      "gaming_risks": ["errors returned as 200 with an error body (contract tests must check bodies)", "4xx returned for what used to be 5xx (the card only counts 5xx and transport errors; a rise in 4xx under the same load is a tell)", "retries inside the handler that hide flakiness at a latency cost"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "rss_kb",
+      "title": "Server resident set after load (ps rss)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "kB",
+      "measure": {
+        "command": "command -v oha >/dev/null 2>&1 || exit 3; {{serve_command}} >/dev/null 2>&1 & SB_PID=$!; sleep {{warmup_s}}; oha -z 10s -q {{rps}} -c 16 --no-tui {{url_base}}{{path}} >/dev/null 2>&1; r=$(ps -o rss= -p $SB_PID | tr -d ' '); kill $SB_PID 2>/dev/null; wait $SB_PID 2>/dev/null; [ -n \"$r\" ] || exit 1; echo \"METRIC rss_kb=$r\"",
+        "parse": "metric-line:rss_kb",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {"SB_LOAD": "1"},
+        "expected_duration_s": [10, 90]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 4}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.5},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(\\b{{handler_function}}\\b[^\\n]*\\n)/$1{{alloc_statement}}\\n/' {{handler_file}}", "expected": "worse"},
+      "gaming_risks": ["a pre-forking server: ps reads the master, not the workers (the metrologist must point SB_PID at the worker or sum the process group)", "memory released only after the load window by a timer that fires before ps runs", "caches disabled to shrink RSS at a latency cost the p95 guardrail should see"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "cold_start_ms",
+      "title": "Process start to first 200 response",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "ms",
+      "measure": {
+        "command": "python3 -c 'import subprocess,time,urllib.request,sys\nt=time.perf_counter()\np=subprocess.Popen(\"{{serve_command}}\", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\nok=False\nwhile time.perf_counter()-t < 90:\n    try:\n        urllib.request.urlopen(\"{{url_base}}{{health_path}}\", timeout=0.5); ok=True; break\n    except Exception:\n        time.sleep(0.02)\nms=(time.perf_counter()-t)*1000\np.terminate()\ntry: p.wait(5)\nexcept Exception: p.kill()\nprint(\"METRIC cold_start_ms=%.0f\" % ms)\nsys.exit(0 if ok else 1)'",
+        "parse": "metric-line:cold_start_ms",
+        "cwd": ".",
+        "timeout_s": 120,
+        "env": {},
+        "expected_duration_s": [0.05, 95]
+      },
+      "fidelity": {"screen": {"repeats": 3}, "full": {"repeats": 5}, "confirm": {"repeats": 5, "max_repeats": 10}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "perl -0pi -e 's/(\\b{{main_function}}\\b[^\\n]*\\n)/$1{{sleep_statement}}\\n/' {{main_file}}", "expected": "worse"},
+      "gaming_risks": ["the health endpoint answers before the app is actually ready (routes registered lazily, database pool opened on first real request)", "startup work deferred into the first request, which the p95 card would show only if the load includes a fresh process", "a lighter serve command substituted (fewer workers, debug flags off) outside a declared config hypothesis"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "vuln_count",
+      "title": "HIGH and CRITICAL dependency vulnerabilities (trivy fs)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "command -v trivy >/dev/null 2>&1 || exit 3; trivy fs --quiet --skip-db-update --scanners vuln --severity HIGH,CRITICAL --format json . 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(\"METRIC vuln_count=%d\" % sum(len(r.get(\"Vulnerabilities\") or []) for r in (d.get(\"Results\") or [])))'",
+        "parse": "metric-line:vuln_count",
+        "cwd": ".",
+        "timeout_s": 300,
+        "env": {},
+        "expected_duration_s": [0.5, 300]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": [".trivyignore"]},
+      "degradation": {"apply": "{{add_vulnerable_dep_command}}", "expected": "worse"},
+      "gaming_risks": ["a .trivyignore or inline ignore added (frozen)", "a vulnerable dependency vendored into the tree under a name the scanner does not recognise", "lockfile removed so the scanner sees fewer pinned versions (lockfiles are protected)"],
+      "contention_safe": true,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [3, 3],
+    "algorithmic": [2, 4],
+    "allocation": [2, 4],
+    "caching": [3, 3],
+    "concurrency": [3, 3],
+    "dependency": [1, 6],
+    "test-add": [2, 3],
+    "bugfix": [2, 3],
+    "refactor-enabling": [1, 5],
+    "data": [1, 8],
+    "model": [1, 9],
+    "numerics": [1, 9],
+    "docs": [1, 7]
+  },
+  "noise_sources": ["load generator jitter and coordinated omission at high rps (oha's -q keeps the rate fixed; still, 2 to 5% p95 variance is normal)", "garbage collection pauses in managed runtimes", "connection reuse: the first second of a run pays handshake cost, which is why warmup_s exists", "port already in use from a previous run that was not killed (the command waits on SB_PID; the harness should also kill the process group)", "another worktree's build running during measurement (serialize; contention_safe=false on every latency card)", "a laptop sleeping or on battery mid-run"],
+  "hygiene_guardrails": ["tests_failed"],
+  "notes": "Stack this pack on the language pack: keep rust-crate's tests_failed and clippy_warnings or python-package's tests_failed and lint_errors as the hygiene guardrails and add p95_s, error_rate, rss_kb from here. Fill {{serve_command}} with something that runs in the foreground and exits on SIGTERM (uvicorn app:app --port N, cargo run --release, node dist/server.js); if it forks workers, point rss at the worker or sum the process group. Fill {{url_base}} (http://127.0.0.1:{{port}}), {{path}} with a representative non-trivial route, {{health_path}} with a cheap readiness route, and two {{holdout_path_*}} routes that hit the same handler family with different keys; the experimenter never sees the holdout routes. {{rps}} should be about 60% of the baseline's saturation rps, measured once during INSTRUMENT with oha's default unlimited rate; a latency goal at saturation is noise. The degradation placeholders ({{sleep_statement}}, {{raise_statement}}, {{alloc_statement}}) are language-specific one-liners the metrologist writes: for Python 'import time; time.sleep(0.05)', 'raise RuntimeError(\"sb\")', '_sb = bytearray(50_000_000)'. p50_s ships as a diagnostic with p95_s as the goal because p95 is what users feel and p50 is easy to improve by caching. The three load cards each start the server; if the total cost is too high keep p95_s and error_rate only. trivy needs its database downloaded once before the campaign (the card runs with --skip-db-update so measurement is offline). If the service needs a database, a compose file the orienteer can bring up is a constraint in the profile; otherwise the latency cards are quarantined at baseline and the campaign should target compile time, binary size, or cold start instead."
+}

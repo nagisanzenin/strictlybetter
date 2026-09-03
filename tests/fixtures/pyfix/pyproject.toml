@@ -1,0 +1,9 @@
+[project]
+name = "slowlib"
+version = "0.1.0"
+description = "Deliberately slow-but-correct utility functions; a strictlybetter benchmark fixture."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+packages = ["slowlib"]

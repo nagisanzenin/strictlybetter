@@ -1,0 +1,198 @@
+{
+  "id": "node-frontend",
+  "title": "Node frontend (bundled web app)",
+  "match": {
+    "any_files": ["package.json", "vite.config.ts", "vite.config.js", "next.config.js", "next.config.mjs", "webpack.config.js", "astro.config.mjs", "svelte.config.js"],
+    "any_dirs": ["src", "public", "pages", "app"],
+    "languages": ["typescript", "javascript"],
+    "any_deps": ["react", "vue", "svelte", "next", "vite", "webpack", "astro", "solid-js", "@angular/core"]
+  },
+  "confidence_notes": "package.json with a build script and a bundler or framework dependency is the signal. If package.json has express, fastify, koa, hono or nest and no bundler, it is service-api instead. If there is a bin field and no index.html or pages, it is cli-tool. A monorepo (workspaces field, pnpm-workspace.yaml, turbo.json) matches per package; report the app package, not the root. Next.js and other SSR apps are node-frontend plus service-api; measure Lighthouse against the built output, not the dev server.",
+  "commands": {
+    "build": "npm run build",
+    "test": "npm test",
+    "lint": "npx eslint .",
+    "bench": null,
+    "typecheck": "npx tsc --noEmit"
+  },
+  "protected_paths": [".github/", ".env", ".env.*", "*.pem", "secrets/", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", ".eslintrc*", "eslint.config.*", "tsconfig.json", "tsconfig.*.json", ".lighthouserc.*", "lighthouserc.*", "vitest.config.*", "jest.config.*", "playwright.config.*"],
+  "frozen_paths_hint": ["tests/", "test/", "__tests__/", "__snapshots__/", "e2e/", "cypress/", "fixtures/", "src/**/*.test.*", "src/**/*.spec.*"],
+  "default_cards": [
+    {
+      "id": "tests_failed",
+      "title": "Failing unit tests (vitest JSON reporter)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "[ -x node_modules/.bin/vitest ] || exit 3; out=$(npx --no-install vitest run --reporter=json 2>/dev/null); printf '%s' \"$out\" | python3 -c 'import json,sys; d=json.load(sys.stdin); f=d[\"numFailedTests\"]; f = f if (f or d.get(\"success\", True)) else 1; print(\"METRIC tests_failed=%d\" % f)'",
+        "parse": "metric-line:tests_failed",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"CI": "1", "NODE_ENV": "test"},
+        "expected_duration_s": [1, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["__tests__/", "__snapshots__/", "tests/", "test/", "vitest.config.ts"]},
+      "degradation": {"apply": "printf '\\nthrow new Error(\"sb-degradation\");\\n' >> {{entry_module}}", "expected": "worse"},
+      "gaming_risks": ["test.skip, it.skip, describe.skip, or .todo added; a test file renamed so the include glob misses it", "snapshots updated with -u (the __snapshots__ dir is frozen; a snapshot inlined into a non-frozen file is the workaround to look for)", "expect(...) assertions replaced by expect.anything() or removed", "vitest.config include/exclude narrowed, or a setupFile that mocks the module under test", "a run with zero total tests reads as a failure via the success flag, never as clean"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "tsc_errors",
+      "title": "TypeScript errors (tsc --noEmit)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "[ -x node_modules/.bin/tsc ] || exit 3; npx --no-install tsc --noEmit --pretty false 2>&1 | awk '/error TS[0-9]+:/{n++} END{print \"METRIC tsc_errors=\" n+0}'",
+        "parse": "metric-line:tsc_errors",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {},
+        "expected_duration_s": [1, 600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["tsconfig.json"]},
+      "degradation": {"apply": "printf '\\nexport const sbDegradation: number = \"not a number\";\\n' >> {{entry_module}}", "expected": "worse"},
+      "gaming_risks": ["// @ts-ignore, // @ts-expect-error, or `as any` casts added", "tsconfig strictness lowered (protected path; look for an inline tsconfig override via a new extends file)", "a file excluded from the program by moving it to a path outside include", "types loosened to unknown/any at module boundaries"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "lint_errors",
+      "title": "ESLint problems (errors + warnings)",
+      "kind": "guardrail",
+      "direction": "minimize",
+      "unit": "count",
+      "measure": {
+        "command": "[ -x node_modules/.bin/eslint ] || exit 3; npx --no-install eslint . -f json 2>/dev/null | python3 -c 'import json,sys; r=json.load(sys.stdin); print(\"METRIC lint_errors=%d\" % sum(f[\"errorCount\"]+f[\"warningCount\"] for f in r))'",
+        "parse": "metric-line:lint_errors",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {},
+        "expected_duration_s": [0.5, 600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": ["eslint.config.js", "eslint.config.mjs", ".eslintrc.json", ".eslintrc.cjs"]},
+      "degradation": {"apply": "printf '\\nvar sbUnused = 1; sbUnused == \"1\";\\n' >> {{entry_module}}", "expected": "worse"},
+      "gaming_risks": ["eslint-disable comments added", ".eslintignore or an ignores entry widened", "rules turned off in a nested config file in a non-protected directory", "code deleted rather than fixed"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "bundle_gzip_bytes",
+      "title": "Gzipped size of all JS in {{dist_dir}}",
+      "kind": "goal",
+      "direction": "minimize",
+      "unit": "bytes",
+      "measure": {
+        "command": "npm run build --silent >/dev/null 2>&1 || exit 1; printf 'METRIC bundle_gzip_bytes=%s\\n' \"$(find {{dist_dir}} -type f -name '*.js' -exec cat {} + | gzip -9 -n | wc -c | tr -d ' ')\"",
+        "parse": "metric-line:bundle_gzip_bytes",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"NODE_ENV": "production", "CI": "1"},
+        "expected_duration_s": [2, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": []},
+      "degradation": {"apply": "python3 -c \"import random; random.seed(7); print('export const sbBloat = [' + ','.join(str(random.random()) for _ in range(40000)) + '];')\" >> {{entry_module}}", "expected": "worse"},
+      "gaming_risks": ["code moved from JS into a JSON, WASM, or CSS asset that the glob does not count", "a route or feature lazy-loaded so its chunk is still shipped but the goal measures the same files: fine if it is genuinely split, not fine if the chunk was renamed to .mjs", "minifier options changed (a config operator; must be declared)", "a dependency replaced by a CDN script tag (network at runtime; check index.html)", "dead code removed by deleting a feature users rely on (tests and Lighthouse a11y should catch a missing UI)"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "lighthouse_perf",
+      "title": "Lighthouse performance score, {{page_path}}",
+      "kind": "goal",
+      "direction": "maximize",
+      "unit": "score",
+      "measure": {
+        "command": "[ -x node_modules/.bin/lhci ] || exit 3; npm run build --silent >/dev/null 2>&1 || exit 1; rm -rf .lighthouseci; npx --no-install lhci collect --static-dist-dir={{dist_dir}} --url={{page_path}} -n 3 >/dev/null 2>&1 || exit 1; python3 -c 'import json,glob,statistics; s=[json.load(open(f))[\"categories\"][\"performance\"][\"score\"] for f in glob.glob(\".lighthouseci/lhr-*.json\")]; print(\"METRIC lighthouse_perf=%.3f\" % statistics.median(s))'",
+        "parse": "metric-line:lighthouse_perf",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"NODE_ENV": "production", "CI": "1"},
+        "expected_duration_s": [15, 900]
+      },
+      "fidelity": {
+        "screen": {"repeats": 1, "command": "[ -x node_modules/.bin/lhci ] || exit 3; npm run build --silent >/dev/null 2>&1 || exit 1; rm -rf .lighthouseci; npx --no-install lhci collect --static-dist-dir={{dist_dir}} --url={{page_path}} -n 1 >/dev/null 2>&1 || exit 1; python3 -c 'import json,glob; s=[json.load(open(f))[\"categories\"][\"performance\"][\"score\"] for f in glob.glob(\".lighthouseci/lhr-*.json\")]; print(\"METRIC lighthouse_perf=%.3f\" % s[0])'", "expected_duration_s": [8, 600]},
+        "full": {"repeats": 1},
+        "confirm": {"repeats": 3, "max_repeats": 5, "holdout": {"kind": "arg", "values": ["{{holdout_page_1}}", "{{holdout_page_2}}"]}}
+      },
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": [".lighthouserc.json", "lighthouserc.js"]},
+      "degradation": {"apply": "python3 -c \"import random; random.seed(7); print('export const sbBloat = [' + ','.join(str(random.random()) for _ in range(60000)) + ']; for (let i = 0; i < 2e8; i++) { globalThis.__sb = (globalThis.__sb || 0) + i; }')\" >> {{entry_module}}", "expected": "worse"},
+      "gaming_risks": ["content removed from the measured page (a blank page scores 100)", "a user-agent or navigator.webdriver sniff that serves a lighter page to headless Chrome", "images replaced with placeholders or lazy-loaded below the fold in a way that never loads them", "third-party scripts deferred past the measurement window but still required for function", "the holdout pages differ from the screened page: an improvement that only lands on {{page_path}} is a page-specific hack"],
+      "contention_safe": false,
+      "noise": null
+    },
+    {
+      "id": "lighthouse_a11y",
+      "title": "Lighthouse accessibility score, {{page_path}}",
+      "kind": "guardrail",
+      "direction": "maximize",
+      "unit": "score",
+      "measure": {
+        "command": "[ -x node_modules/.bin/lhci ] || exit 3; npm run build --silent >/dev/null 2>&1 || exit 1; rm -rf .lighthouseci; npx --no-install lhci collect --static-dist-dir={{dist_dir}} --url={{page_path}} -n 1 --settings.onlyCategories=accessibility >/dev/null 2>&1 || exit 1; python3 -c 'import json,glob; s=[json.load(open(f))[\"categories\"][\"accessibility\"][\"score\"] for f in glob.glob(\".lighthouseci/lhr-*.json\")]; print(\"METRIC lighthouse_a11y=%.3f\" % s[0])'",
+        "parse": "metric-line:lighthouse_a11y",
+        "cwd": ".",
+        "timeout_s": 600,
+        "env": {"NODE_ENV": "production", "CI": "1"},
+        "expected_duration_s": [8, 600]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 0},
+      "integrity": {"frozen_paths": [".lighthouserc.json", "lighthouserc.js"]},
+      "degradation": {"apply": "perl -0pi -e 's/<img /<img alt=\"\" role=\"presentation\" /g; s/<button/<div onclick=\"\"/g' {{index_html}}", "expected": "worse"},
+      "gaming_risks": ["interactive elements removed instead of labelled", "aria attributes added mechanically (aria-label=\"\") that satisfy the audit without helping users", "the page rendered empty for the auditor"],
+      "contention_safe": true,
+      "noise": null
+    },
+    {
+      "id": "tti_ms",
+      "title": "Time to interactive, {{page_path}}",
+      "kind": "diagnostic",
+      "direction": "minimize",
+      "unit": "ms",
+      "measure": {
+        "command": "[ -x node_modules/.bin/lhci ] || exit 3; npm run build --silent >/dev/null 2>&1 || exit 1; rm -rf .lighthouseci; npx --no-install lhci collect --static-dist-dir={{dist_dir}} --url={{page_path}} -n 3 >/dev/null 2>&1 || exit 1; python3 -c 'import json,glob,statistics; s=[json.load(open(f))[\"audits\"][\"interactive\"][\"numericValue\"] for f in glob.glob(\".lighthouseci/lhr-*.json\")]; print(\"METRIC tti_ms=%.0f\" % statistics.median(s))'",
+        "parse": "metric-line:tti_ms",
+        "cwd": ".",
+        "timeout_s": 900,
+        "env": {"NODE_ENV": "production", "CI": "1"},
+        "expected_duration_s": [15, 900]
+      },
+      "fidelity": {"screen": {"repeats": 1}, "full": {"repeats": 1}, "confirm": {"repeats": 3, "max_repeats": 5, "holdout": {"kind": "arg", "values": ["{{holdout_page_1}}", "{{holdout_page_2}}"]}}},
+      "acceptance": {"kappa": 2.5, "tolerance_sigma": 1.0},
+      "integrity": {"frozen_paths": [".lighthouserc.json", "lighthouserc.js"]},
+      "degradation": {"apply": "printf '\\nfor (let i = 0; i < 3e8; i++) { globalThis.__sb = (globalThis.__sb || 0) + i; }\\n' >> {{entry_module}}", "expected": "worse"},
+      "gaming_risks": ["main-thread work moved to a requestIdleCallback that never runs during the audit but still blocks real users later", "hydration skipped for the measured route only"],
+      "contention_safe": false,
+      "noise": null
+    }
+  ],
+  "operator_priors": {
+    "config": [2, 3],
+    "algorithmic": [2, 4],
+    "allocation": [1, 8],
+    "caching": [2, 3],
+    "concurrency": [1, 5],
+    "dependency": [2, 4],
+    "test-add": [2, 3],
+    "bugfix": [2, 3],
+    "refactor-enabling": [1, 4],
+    "data": [1, 9],
+    "model": [1, 9],
+    "numerics": [1, 9],
+    "docs": [1, 7]
+  },
+  "noise_sources": ["headless Chrome timing (Lighthouse recommends the median of 3 to 5 runs; TTI varies 10 to 20% run to run on a laptop)", "network stubs and service workers left registered between runs (lhci uses a fresh profile; a custom runner may not)", "node_modules hard-link state and bundler caches (.vite, .next/cache) across worktrees", "CPU throttling emulation in Lighthouse interacting with a busy host", "font and image decoding on first paint"],
+  "hygiene_guardrails": ["tests_failed", "tsc_errors", "lint_errors"],
+  "notes": "Reuse first: an existing lighthouserc, a size-limit or bundlesize config, or a CI step that reports bundle size is trusted more than these defaults; read package.json scripts for build, test, lint and typecheck names. Fill {{dist_dir}} from the bundler config (dist, build, .next, out), {{page_path}} with a real route (/ is fine), {{entry_module}} with the app entry (src/main.tsx, src/index.ts). The three Lighthouse cards share a build and a collect run each; they are not cached across cards, so if cost matters keep lighthouse_perf and drop tti_ms. Lighthouse and TTI are contention_safe=false. Lighthouse holdout is by page: pick two routes the experimenter is not shown, and treat a gain on the screened route that vanishes on holdout as a page-specific hack. For jest instead of vitest use npx jest --json --silent; the JSON fields (numFailedTests, success) are the same. Snapshot files are frozen; a diff that inlines a snapshot into a test helper is the workaround the judge should look for. dependency gets a warmer prior here than elsewhere because swapping a heavy library for a lighter one is the most common honest bundle-size win."
+}
