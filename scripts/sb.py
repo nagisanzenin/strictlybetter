@@ -2026,6 +2026,9 @@ def cmd_confirm(home: Home, args) -> int:
                                             bases=fresh_bases(home, c, "full", head_full) if paired else None)
             dfull = decide(cards, c, comps_full, "full")
             home.ledger_add(eid, "measure", {"fidelity": "full", "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in full_results.items()}})
+            goals_at_full = [g for g in c["goals"] if g in full_results]
+            if not goals_at_full and dfull["verdict"] == "discard" and dfull["reason"] == "noise":
+                dfull["verdict"], dfull["reason"] = "pass", "no goal measured at full; guardrails held"   # only guardrails have a full level
             if dfull["verdict"] == "discard":
                 out = {"verdict": "discard", "reason": dfull["reason"], "level": "full", "commit": r["commit"], "comparisons": comps_full}
                 home.ledger_add(eid, "confirm", out)
@@ -3049,6 +3052,7 @@ def selftest() -> int:
                   "integrity": {"frozen_paths": ["bench.py", "tests/"]}, "gaming_risks": ["edit bench"], "contention_safe": True,
                   "degradation": {"apply": "python3 -c \"open('work.py','w').write('N = 60\\n')\""}}
         card_h = {"id": "tests_failed", "kind": "guardrail", "direction": "minimize", "measure": {"command": "python3 tests/t.py", "parse": "metric-line:tests_failed", "timeout_s": 60},
+                  "fidelity": {"full": {"repeats": 1}},   # a guardrail-only full level must not block a goal that has none (power-bench finding)
                   "integrity": {"frozen_paths": ["tests/"]}, "gaming_risks": [], "contention_safe": True, "acceptance": {"tolerance_sigma": 0}}
         card_q = {"id": "checks", "kind": "guardrail", "direction": "equal", "measure": {"command": "python3 bench.py", "parse": "metric-line:checks", "timeout_s": 60},
                   "gaming_risks": [], "contention_safe": True}
@@ -3181,6 +3185,7 @@ def selftest() -> int:
         check("confirm accepts real improvement", r["confirm"]["verdict"] == "accept")
         tt = (r["confirm"].get("tests") or {}).get("score") or {}
         check("confirm carries the exact test", tt.get("kind") == "paired-sign-flip" and tt.get("p") is not None and tt["p"] <= tt["alpha"] and tt.get("n_pairs") == 10)
+        check("guardrail-only full level does not block", r["confirm"].get("level") == "confirm")
         check("confirm is paired against fresh head", r["confirm"].get("paired") is True and (r["confirm"].get("head_results") or {}).get("score", {}).get("median") in (40.0, 41.0))
         check("confirm used the holdout seeds", sorted(set((r["confirm"].get("results") or {}).get("seed", {}).get("values") or [])) == [7.0, 8.0, 9.0])
         check("paired baseline is fresh head median", any(comp["id"] == "score" and comp["baseline"] in (40.0, 41.0) for comp in r["confirm"]["comparisons"]))
