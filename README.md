@@ -157,6 +157,47 @@ Six months of autoresearch-style loops produced a casebook of agents gaming thei
 
 Prompts are advice. Hooks and hashes are walls.
 
+## Defensibility
+
+"Why it will not fool you" is the inward direction: the loop cannot fool itself. Defensibility is the outward one: every accepted change already carries the evidence needed to defend it — to a colleague reviewing the pull request, a future agent continuing the campaign, or you in three months.
+
+**The chain of evidence for one accepted change:**
+
+```
+              "why did the loop make this commit?"
+                              │
+                              ▼
+  1 · the commit message — the strictlybetter provenance block
+      pre-registered hypothesis, hash-bound before the diff existed
+      baseline → confirmed per goal and guardrail: delta, σ, threshold
+      blind judge verdict and pattern · confirmation rounds · holdout
+      auditable in thirty seconds, without any other file
+                              │
+                              ▼
+  2 · the ledger — .strictlybetter/ledger.jsonl, append-only
+      every experiment, kept or discarded, each with its reason
+      budget charged before each experiment · cost per accepted change
+      every halt: when it stopped, and why
+                              │
+                              ▼
+  3 · the instruments — metric cards are ordinary commands, fingerprinted
+      and hash-checked before every measurement; held-out seeds live
+      outside the experimenter's reach, copied in only at confirm time
+                              │
+                              ▼
+      a reviewer re-runs the evidence instead of trusting the agent
+```
+
+| The reviewer asks | The answer is already written |
+|---|---|
+| "Why did it touch this file?" | The pre-registered hypothesis the diff implements — hash-bound before the diff existed |
+| "Prove it is actually better." | Baseline → confirmed value per goal, with the measured noise floor it had to clear by 2.5σ |
+| "How do we know nothing else broke?" | Each guardrail has its own baseline → confirmed line; floors only ever move in the good direction |
+| "Is this thing gaming the benchmark?" | The blind judge's verdict — its schema has no field for reasoning — plus frozen-instrument hash checks, and every discarded diff archived with its reason |
+| "What did it cost?" | Budget charged before each experiment; dollars and minutes per accepted change, in the ledger and the report |
+
+A commit without a provenance block did not come from the loop. And the loop never merges: whatever lands next carries your name — the evidence is written for the person who has to defend it.
+
 ---
 
 ## Install
