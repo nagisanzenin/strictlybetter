@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # ----------------------------------------------------------------------------
 # Constants (fixed before data; see docs/04 and docs/06). Do not tune to results.
@@ -549,6 +549,43 @@ def card_sign(card: dict) -> int:
 _OUTPUT_CACHE: dict = {}
 
 
+@contextlib.contextmanager
+def services_up(svc: dict | None, checkout: str, label: str):
+    """Bring up whatever a measurement needs (a database, a compose stack, a mock server), wait
+    until `ready` passes, yield (ok, reason), and always tear down. Setup or readiness failure
+    makes the measurement invalid, never a crash. SB_CHECKOUT points setup at the code under test."""
+    if not svc or not any(svc.get(k) for k in ("setup", "ready", "teardown")):
+        yield True, None
+        return
+    cwd = os.path.join(checkout, svc.get("cwd", ".")) if svc.get("cwd") not in (None, ".", "") else checkout
+    env = {"SB_CHECKOUT": checkout, "PYTHONDONTWRITEBYTECODE": "1"}
+    ok, reason = True, None
+    try:
+        if svc.get("setup"):
+            rc, out, err, _ = run_cmd(svc["setup"], cwd=cwd, env=env, timeout=float(svc.get("setup_timeout_s", 600)))
+            if rc != 0:
+                ok, reason = False, f"{label}: setup failed (rc={rc}): {(err or out)[-200:].strip()}"
+        if ok and svc.get("ready"):
+            deadline = time.time() + float(svc.get("ready_timeout_s", 120))
+            while True:
+                rc, out, err, _ = run_cmd(svc["ready"], cwd=cwd, env=env, timeout=60)
+                if rc == 0:
+                    break
+                if time.time() >= deadline:
+                    ok, reason = False, f"{label}: not ready within {svc.get('ready_timeout_s', 120)}s"
+                    break
+                time.sleep(float(svc.get("ready_interval_s", 2)))
+        yield ok, reason
+    finally:
+        if svc.get("teardown"):
+            run_cmd(svc["teardown"], cwd=cwd, env=env, timeout=float(svc.get("teardown_timeout_s", 300)))
+
+
+def invalid_summary(reason: str, level: str) -> dict:
+    return {"n": 1, "n_valid": 0, "values": [], "invalid": [reason], "secs_total": 0.0, "median": None, "sigma": None,
+            "valid": False, "runs": [{"rc": None, "secs": 0.0, "value": None, "valid": False, "invalid_reason": reason, "holdout": None}], "fidelity": level}
+
+
 def measure_once(card: dict, level: str, checkout: str, holdout_value=None, extra_env=None) -> dict:
     spec = fidelity_spec(card, level)
     cmd = spec["command"]
@@ -666,9 +703,12 @@ def measure_card(home: Home, card: dict, level: str, checkout: str, repeats: int
         _OUTPUT_CACHE.clear()  # a fresh run starts a new reuse epoch; only reuse_output cards read the cache
     runs = []
     with measurement_lock(home, card):
-        for i in range(repeats):
-            hv = hvals[i % len(hvals)] if hvals else None
-            runs.append(measure_once(card, level, checkout, holdout_value=hv, extra_env=extra_env))
+        with services_up(card.get("services"), checkout, f"card {card['id']} services") as (ok, why):
+            if not ok:
+                return invalid_summary(why, level)
+            for i in range(repeats):
+                hv = hvals[i % len(hvals)] if hvals else None
+                runs.append(measure_once(card, level, checkout, holdout_value=hv, extra_env=extra_env))
     s = summarize(runs, card)
     s["runs"] = runs
     s["fidelity"] = level
@@ -703,6 +743,63 @@ def worktree_drop(home: Home, name: str) -> None:
     git(["worktree", "prune"], home.repo, check=False)
 
 
+EXTERNAL_SKIP_DIRS = {".git", "__pycache__", "node_modules", "target", ".venv", "venv", ".tox", ".mypy_cache", ".pytest_cache", "dist", "build"}
+
+
+def external_hash(path: str) -> str | None:
+    """Content hash of an instrument that lives OUTSIDE the campaign repo (a harness in a sibling
+    repo, a shared eval script). Files hash directly; directories hash every file under them
+    except build and VCS directories. None when the path does not exist."""
+    path = os.path.abspath(path)
+    h = hashlib.sha256()
+    if os.path.isfile(path):
+        h.update(sha256_file(path).encode("ascii"))
+        return h.hexdigest()
+    if not os.path.isdir(path):
+        return None
+    for root_, dirs, files in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if d not in EXTERNAL_SKIP_DIRS)
+        for f in sorted(files):
+            fp = os.path.join(root_, f)
+            if os.path.islink(fp) or not os.path.isfile(fp):
+                continue
+            rel = os.path.relpath(fp, path)
+            h.update(rel.encode("utf-8") + b"\0" + sha256_file(fp).encode("ascii") + b"\0")
+    return h.hexdigest()
+
+
+def external_instruments(home: Home, c: dict | None) -> list:
+    """Absolute paths outside the repo that are part of the instrument: campaign-level list plus
+    every card's integrity.external_paths."""
+    out = []
+    if c:
+        out += [os.path.abspath(p) for p in (c.get("external_instruments") or [])]
+        ids = list(c.get("goals", [])) + list(c.get("guardrails", [])) + list(c.get("diagnostics", []))
+    else:
+        ids = home.list_cards()
+    for mid in ids:
+        try:
+            card = home.load_card(mid)
+        except SBError:
+            continue
+        out += [os.path.abspath(p) for p in ((card.get("integrity") or {}).get("external_paths") or [])]
+    seen, uniq = set(), []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return uniq
+
+
+def verify_external(home: Home, c: dict) -> None:
+    want = c.get("external_hashes") or {}
+    for path, h in want.items():
+        now = external_hash(path)
+        if now != h:
+            halt(home, c, f"external-tampered:{path}")
+            raise SBError(f"external instrument changed during the campaign: {path} (the instrument is frozen); halted")
+
+
 def card_fingerprint(card: dict) -> str:
     """Hash of the measurement-relevant fields of a card (noise/probe/title are free to change)."""
     core = {k: v for k, v in card.items() if k not in ("noise", "probe", "title", "gaming_risks")}
@@ -710,6 +807,7 @@ def card_fingerprint(card: dict) -> str:
 
 
 def verify_card_hashes(home: Home, c: dict) -> None:
+    verify_external(home, c)
     want = c.get("card_hashes") or {}
     for mid, h in want.items():
         try:
@@ -1134,7 +1232,11 @@ def cmd_card_probe(home: Home, args) -> int:
     commit = head_commit(home)
     name = f"_probe-{card['id']}"
     path = worktree_new(home, name, commit)
+    c_probe = home.campaign()
     try:
+      with services_up((c_probe or {}).get("services"), path, "campaign services") as (svc_ok, svc_why):
+        if not svc_ok:
+            raise SBError(f"probe cannot run: {svc_why}")
         before = measure_card(home, card, "screen", path, repeats=max(1, args.repeats), use_holdout=False)
         rc, out, err, _ = run_cmd(deg["apply"], cwd=path, env={"PYTHONDONTWRITEBYTECODE": "1"}, timeout=300)
         _OUTPUT_CACHE.clear()  # the tree changed; nothing measured before the degradation may be reused
@@ -1180,6 +1282,9 @@ def cmd_baseline(home: Home, args) -> int:
     path = worktree_new(home, "_baseline", commit)
     baseline = home.baseline()
     try:
+      with services_up((c or {}).get("services"), path, "campaign services") as (svc_ok, svc_why):
+        if not svc_ok:
+            raise SBError(f"baseline cannot run: {svc_why}")
         for mid in ids:
             card = home.load_card(mid)
             entry = baseline.get(mid) or {}
@@ -1299,11 +1404,25 @@ def campaign_start(home: Home, args) -> int:
         "archetype_priors": spec.get("archetype_priors") or {},
     }
     # frozen paths and eval hash from a clean checkout
+    c["external_instruments"] = [os.path.abspath(p) for p in (spec.get("external_instruments") or [])]
+    c["scope_paths"] = list(spec.get("scope_paths") or [])
+    c["services"] = spec.get("services") or None
     path = worktree_new(home, "_campaign", commit)
     try:
         fp = frozen_paths(home, c)
         c["frozen_paths_effective"] = fp
         c["eval_hash"] = eval_hash(path, fp)
+        ext = external_instruments(home, c)
+        c["external_instruments_effective"] = ext
+        c["external_hashes"] = {}
+        for ep in ext:
+            hh = external_hash(ep)
+            if hh is None:
+                raise SBError(f"external instrument not found: {ep}")
+            repo_real = os.path.realpath(home.repo)
+            if os.path.realpath(ep).startswith(repo_real + os.sep):
+                raise SBError(f"external instrument {ep} is inside the repo; list it under frozen_paths instead")
+            c["external_hashes"][ep] = hh
     finally:
         worktree_drop(home, "_campaign")
     # branch
@@ -1435,6 +1554,7 @@ def cmd_submit(home: Home, args) -> int:
     violations = []
     fp = c.get("frozen_paths_effective") or frozen_paths(home, c)
     pp = protected_paths(home, c)
+    scope = c.get("scope_paths") or []
     for f in ds["files"]:
         if matches_any(f, fp):
             violations.append(f"frozen:{f}")
@@ -1442,6 +1562,8 @@ def cmd_submit(home: Home, args) -> int:
             violations.append(f"protected:{f}")
         elif f.startswith(".strictlybetter/"):
             violations.append(f"state:{f}")
+        elif scope and not matches_any(f, scope):
+            violations.append(f"scope:{f}")
     if c.get("walls", {}).get("frozen_guard", True):
         eh = eval_hash(path, fp)
         if eh != c.get("eval_hash"):
@@ -1484,10 +1606,14 @@ def cmd_measure(home: Home, args) -> int:
     t0 = time.perf_counter()
     wall = 0.0
     try:
+      with services_up(c.get("services"), checkout, "campaign services") as (svc_ok, svc_why):
         ids = list(c["goals"]) + list(c["guardrails"]) + (list(c["diagnostics"]) if level != "screen" else [])
         for mid in ids:
             card = cards[mid]
             spec = fidelity_spec(card, level)
+            if not svc_ok:
+                results[mid] = invalid_summary(svc_why, level)
+                continue
             if spec.get("skip"):
                 results[mid] = {"skipped": True, "valid": True, "median": None, "sigma": None, "n": 0, "n_valid": 0, "values": [], "invalid": [], "secs_total": 0.0, "fidelity": level}
                 continue
@@ -1671,6 +1797,12 @@ def cmd_confirm(home: Home, args) -> int:
     checkout = worktree_new(home, f"{eid}-confirm", r["commit"])
     t0 = time.perf_counter()
     try:
+      with services_up(c.get("services"), checkout, "campaign services") as (svc_ok, svc_why):
+        if not svc_ok:
+            out = {"verdict": "discard", "reason": "invalid", "level": "confirm", "commit": r["commit"], "note": svc_why, "comparisons": [], "results": {}}
+            home.ledger_add(eid, "confirm", out)
+            print(json.dumps({k: v for k, v in out.items() if k not in ("comparisons", "results")}))
+            return 0
         # full fidelity first when it differs from screen
         full_results = {}
         for mid in list(c["goals"]) + list(c["guardrails"]):
@@ -2028,6 +2160,7 @@ def cmd_next(home: Home, args) -> int:
              "archive_hints": archive, "inheritance": home.p("inheritance.md") if os.path.exists(home.p("inheritance.md")) else None,
              "stop_requested": stop_requested(home), "screen_untrusted": bool(c.get("screen_untrusted")), "decision_hint": s.get("decision") if "decision" in s else None,
              "max_parallel": int(c.get("max_parallel", 2)), "distill_every": int(c.get("distill_every", 8)), "iteration_cap": int(c.get("iteration_cap", DEFAULT_ITERATION_CAP)),
+             "scope_paths": c.get("scope_paths") or [], "external_instruments": c.get("external_instruments_effective") or [],
              "walls": c.get("walls"), "mde": c.get("mde")}
     if args.json:
         print(json.dumps(brief, indent=2))
@@ -2152,6 +2285,10 @@ def guard_decision(home: Home, path: str) -> tuple:
     ap = os.path.abspath(path)
     repo = os.path.realpath(home.repo)
     apr = os.path.realpath(ap) if os.path.exists(ap) else os.path.join(os.path.realpath(os.path.dirname(ap)), os.path.basename(ap))
+    for ep in c.get("external_instruments_effective") or external_instruments(home, c):
+        er = os.path.realpath(ep)
+        if apr == er or apr.startswith(er + os.sep):
+            return False, f"external instrument ({ep}): frozen for the campaign"
     if not (apr == repo or apr.startswith(repo + os.sep)):
         return True, "outside repo"
     home_real = os.path.realpath(home.path)
@@ -2170,6 +2307,9 @@ def guard_decision(home: Home, path: str) -> tuple:
         hit = matches_any(rel, pp)
         if hit:
             return False, f"protected path ({hit})"
+        scope = c.get("scope_paths") or []
+        if scope and rel and not matches_any(rel, scope):
+            return False, f"outside the campaign scope ({', '.join(scope)})"
         return True, "inside experiment worktree"
     if apr.startswith(home_real + os.sep) or apr == home_real:
         rel = os.path.relpath(apr, home_real)
@@ -2648,6 +2788,102 @@ def selftest() -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_report(home, argparse.Namespace())
         check("report written", os.path.exists(home.p("reports", "t1.md")))
+        for name in list(os.listdir(home.wt_dir)):
+            worktree_drop(home, name)
+    # --- multi-repo, monorepo scope, and services on a second temp repo
+    with tempfile.TemporaryDirectory() as td:
+        repo = os.path.join(td, "repo")
+        harness = os.path.join(td, "harness")   # an instrument OUTSIDE the repo
+        os.makedirs(repo)
+        os.makedirs(harness)
+        git(["init", "-q", "-b", "main"], repo)
+        git(["config", "user.email", "t@t"], repo)
+        git(["config", "user.name", "t"], repo)
+        os.makedirs(os.path.join(repo, "pkg"))
+        os.makedirs(os.path.join(repo, "other"))
+        with open(os.path.join(repo, "pkg", "work.py"), "w") as f:
+            f.write("N = 40\n")
+        with open(os.path.join(repo, "other", "readme.txt"), "w") as f:
+            f.write("not in scope\n")
+        with open(os.path.join(harness, "bench.py"), "w") as f:
+            f.write("import sys, os\nsys.path.insert(0, os.path.join(os.environ['SB_CHECKOUT_DIR'], 'pkg'))\nimport work\n"
+                    "assert os.path.exists(os.path.join(os.environ['SB_CHECKOUT_DIR'], '.svc-up')), 'service not up'\n"
+                    "print('METRIC score=%d' % work.N)\n")
+        git(["add", "-A"], repo)
+        git(["commit", "-q", "-m", "base"], repo)
+        home = Home(repo=repo, home=os.path.join(repo, ".strictlybetter"))
+        home.ensure()
+        tlog = os.path.join(td, "teardown.log")
+        card = {"id": "score", "kind": "goal", "direction": "minimize",
+                "measure": {"command": f"SB_CHECKOUT_DIR=$PWD python3 {harness}/bench.py", "parse": "metric-line:score", "timeout_s": 60},
+                "fidelity": {"screen": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 2}},
+                "integrity": {"external_paths": [harness]}, "gaming_risks": ["edit harness"], "contention_safe": True,
+                "services": {"setup": "touch .svc-up", "ready": "test -f .svc-up", "ready_timeout_s": 5, "teardown": f"rm -f .svc-up; echo down >> {tlog}"}}
+        validate_card(card)
+        home.save_card(card)
+        spec = {"id": "mr", "goals": ["score"], "guardrails": [], "budget": {"experiments": 4}, "plateau_patience": 3,
+                "scope_paths": ["pkg/"], "walls": {"holdout": False}}
+        sp = os.path.join(td, "c.json")
+        write_json_atomic(sp, spec)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_campaign(home, argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False))
+        c = home.campaign()
+        check("external instrument hashed at start", harness in (c.get("external_hashes") or {}))
+        check("services teardown ran after baseline", os.path.exists(tlog) and open(tlog).read().count("down") >= 1)
+        check("baseline measured through the service", (home.baseline().get("score") or {}).get("best") == 40.0)
+        check("guard denies external instrument", not guard_decision(home, os.path.join(harness, "bench.py"))[0])
+        hp = os.path.join(td, "h.json")
+        write_json_atomic(hp, {"operator": "config", "target": "other/readme.txt", "hypothesis": "out of scope edit", "predicted": {"score": "-1%"}})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cmd_prereg(home, argparse.Namespace(file=hp))
+        e1 = json.loads(out.getvalue())["id"]
+        check("guard denies out-of-scope path in worktree", not guard_decision(home, os.path.join(home.wt_dir, e1, "other", "readme.txt"))[0])
+        check("guard allows in-scope path in worktree", guard_decision(home, os.path.join(home.wt_dir, e1, "pkg", "work.py"))[0])
+        with open(os.path.join(home.wt_dir, e1, "other", "readme.txt"), "a") as f:
+            f.write("edited\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = cmd_submit(home, argparse.Namespace(id=e1))
+        r = home.experiments()[e1]
+        check("submit flags out-of-scope edit", rc != 0 and any(v.startswith("scope:") for v in r["integrity_violations"]))
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_discard(home, argparse.Namespace(id=e1, reason="integrity", archive=False))
+        # tamper with the external harness: the next decision halts
+        with open(os.path.join(harness, "bench.py"), "a") as f:
+            f.write("print('METRIC score=0')\n")
+        write_json_atomic(hp, {"operator": "algorithmic", "target": "pkg/work.py", "hypothesis": "halve N", "predicted": {"score": "-50%"}})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cmd_prereg(home, argparse.Namespace(file=hp))
+        e2 = json.loads(out.getvalue())["id"]
+        with open(os.path.join(home.wt_dir, e2, "pkg", "work.py"), "w") as f:
+            f.write("N = 20\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_submit(home, argparse.Namespace(id=e2))
+        halted = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_measure(home, argparse.Namespace(id=e2, fidelity="screen", repeats=None, keep_runs=False, audit=False))
+        except SBError:
+            halted = str(home.campaign().get("halt_reason", "")).startswith("external-tampered")
+        check("external instrument tampering halts", halted)
+        # a failing service makes the measurement invalid, not a crash
+        with open(os.path.join(harness, "bench.py"), "w") as f:
+            f.write("print('METRIC score=1')\n")
+        c = home.campaign()
+        c["external_hashes"][harness] = external_hash(harness)
+        c["status"] = "running"
+        c["halt_reason"] = None
+        home.save_campaign(c)
+        card["services"] = {"setup": "true", "ready": "false", "ready_timeout_s": 0}
+        home.save_card(card)
+        c["card_hashes"]["score"] = card_fingerprint(card)
+        home.save_campaign(c)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_measure(home, argparse.Namespace(id=e2, fidelity="screen", repeats=None, keep_runs=False, audit=False))
+            cmd_judge(home, argparse.Namespace(id=e2, fidelity="screen"))
+        r = home.experiments()[e2]
+        check("service not ready -> invalid, not a crash", r["judge_stat"]["verdict"] == "discard" and r["judge_stat"]["reason"] == "invalid")
         for name in list(os.listdir(home.wt_dir)):
             worktree_drop(home, name)
     failed = [n for n, ok in checks if not ok]
