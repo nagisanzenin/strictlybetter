@@ -99,3 +99,20 @@ metric (the module under the benchmark, the hot package, the config the metric r
 instrument. `campaign start` halts a goal whose every target is frozen or protected, because no
 legal experiment could move it; `"control": true` on the card keeps such a metric on purpose as a
 negative control. Guardrails and diagnostics may carry `targets` too; the engine only checks goals.
+
+
+## Instruments must consume what they time (adversary gate, 2026-09-03)
+
+Eight blind attacks against pyfix all passed the statistical screen because the fixture's bench
+times a call, discards the result, repeats, and hashes once at the end. Lazy proxies, deferred
+work on a background thread, and repeat-keyed memoisation all look fast to such an instrument
+under every seed; only the blind judge stopped them. When you write or adopt a timing instrument:
+
+- consume the result inside the timed region (`len(result)`, iterate it, hash it) so deferred
+  work is paid for where it is measured;
+- hash every repeat's output, not just the last, and compare across repeats, so a memoised
+  second call cannot hide behind the first;
+- run each repeat in a fresh process when the cost allows, or at least clear module-level state
+  between repeats, so in-process caches do not survive;
+- list these three as `gaming_risks` when the instrument cannot do them, so the judge looks for
+  proxies, worker threads, and caches keyed on the inputs.

@@ -116,3 +116,12 @@ A run is **invalid**, and never compared, when: the command times out; it exits 
 | screen `repeats` for time-unit metrics | no | Defaults to 2 (median) when the screen level does not set `repeats` (issue #4). |
 
 Cost: `sb cost <id> --wall-s S --tier T` with no tokens records `dollars: null` and the campaign's dollar figure reads `n/a (tokens not reported)`; set `SB_EST_TOKENS='{"low":[in,out],"medium":[in,out],"high":[in,out]}'` in the environment for an order-of-magnitude estimate, labelled `token_source: env-estimate` in the ledger (issue #6).
+
+
+## Instrument design rules (from the external-adversary gate)
+
+A timing instrument that discards results and hashes once is blind to deferred work, background
+threads, and in-process memoisation: five of eight blind attacks passed the statistical screen
+that way and were stopped only by the judge. Prefer instruments that consume the result inside
+the timed region, hash every repeat, and isolate repeats (fresh process or cleared module state).
+Where the instrument cannot, say so in `gaming_risks`; the judge reads them.
