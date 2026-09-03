@@ -68,7 +68,7 @@ class PathMatchTests(unittest.TestCase):
 class AcceptanceRuleTests(unittest.TestCase):
     goal = {"id": "g", "kind": "goal", "direction": "minimize"}
     guard = {"id": "h", "kind": "guardrail", "direction": "maximize"}
-    base = {"median": 100.0, "sigma": 4.0}
+    base = {"median": 100.0, "sigma": 4.0, "n": 1}   # n=1 both sides: se_factor = sqrt(2)
 
     def test_kappa_eff(self):
         self.assertAlmostEqual(sb.kappa_eff(2.5, 0, 0), 2.5)
@@ -76,17 +76,22 @@ class AcceptanceRuleTests(unittest.TestCase):
         self.assertAlmostEqual(sb.kappa_eff(2.5, 0, 2), 4.5)
 
     def test_goal_threshold(self):
-        c = sb.compare_metric(self.goal, self.base, {"valid": True, "median": 89.0}, 2.5, 1.0, WALLS)
-        self.assertTrue(c["improved"])           # delta 11 > 2.5*4
-        c = sb.compare_metric(self.goal, self.base, {"valid": True, "median": 91.0}, 2.5, 1.0, WALLS)
-        self.assertFalse(c["improved"])          # delta 9 < 10
+        # threshold = kappa * sigma * sqrt(1/1 + 1/1) = 2.5 * 4 * 1.414 = 14.14
+        c = sb.compare_metric(self.goal, self.base, {"valid": True, "median": 85.0}, 2.5, 1.0, WALLS)
+        self.assertTrue(c["improved"])           # delta 15 > 14.14
+        c = sb.compare_metric(self.goal, self.base, {"valid": True, "median": 87.0}, 2.5, 1.0, WALLS)
+        self.assertFalse(c["improved"])          # delta 13 < 14.14
         self.assertTrue(c["inconclusive"])
+        # more repeats on both sides shrink the threshold: n=5 vs 3 -> factor 0.73 -> 7.3
+        c = sb.compare_metric(self.goal, {**self.base, "n": 5}, {"valid": True, "median": 91.0, "n_valid": 3}, 2.5, 1.0, WALLS)
+        self.assertTrue(c["improved"])
 
     def test_guardrail_tolerance(self):
-        c = sb.compare_metric(self.guard, self.base, {"valid": True, "median": 97.0}, 2.5, 1.0, WALLS)
-        self.assertFalse(c["regressed"])         # drop 3 < 1*4
-        c = sb.compare_metric(self.guard, self.base, {"valid": True, "median": 95.0}, 2.5, 1.0, WALLS)
-        self.assertTrue(c["regressed"])          # drop 5 > 4
+        # tolerance = 1 * 4 * 1.414 = 5.66
+        c = sb.compare_metric(self.guard, self.base, {"valid": True, "median": 96.0}, 2.5, 1.0, WALLS)
+        self.assertFalse(c["regressed"])         # drop 4 < 5.66
+        c = sb.compare_metric(self.guard, self.base, {"valid": True, "median": 93.0}, 2.5, 1.0, WALLS)
+        self.assertTrue(c["regressed"])          # drop 7 > 5.66
 
     def test_equal_direction(self):
         eq = {"id": "q", "kind": "guardrail", "direction": "equal"}
@@ -117,7 +122,7 @@ class AcceptanceRuleTests(unittest.TestCase):
     def test_oec_composition(self):
         camp = {"goals": ["g", "g2"], "guardrails": [], "walls": WALLS, "composition": "oec", "oec_weights": {"g": 1.0, "g2": 1.0}, "_kappa_eff": 2.5}
         g2 = {"id": "g2", "kind": "goal", "direction": "maximize"}
-        c1 = sb.compare_metric(self.goal, self.base, {"valid": True, "median": 94.0}, 2.5, 1.0, WALLS)   # +1.5 sigma
+        c1 = sb.compare_metric(self.goal, self.base, {"valid": True, "median": 94.0}, 2.5, 1.0, WALLS)   # +1.5 sigma (delta_sigma is unscaled)
         c2 = sb.compare_metric(g2, self.base, {"valid": True, "median": 106.0}, 2.5, 1.0, WALLS)         # +1.5 sigma
         d = sb.decide({}, camp, [c1, c2], "confirm")
         self.assertEqual(d["verdict"], "promote")   # 3.0 > 2.5 combined
@@ -126,7 +131,9 @@ class AcceptanceRuleTests(unittest.TestCase):
 class StatsTests(unittest.TestCase):
     def test_sigma(self):
         self.assertIsNone(sb.sigma_of([1.0]))
-        self.assertAlmostEqual(sb.sigma_of([2.0, 4.0]), 1.4142135, places=5)
+        self.assertAlmostEqual(sb.sigma_of([2.0, 4.0]), 1.4142135, places=5)   # n<4: stdev
+        self.assertLess(sb.sigma_of([100, 101, 99, 100, 400]), 5.0)             # n>=4: MAD-scaled ignores a burst
+        self.assertAlmostEqual(sb.se_factor(3, 5), (1 / 3 + 1 / 5) ** 0.5)
 
     def test_summarize_numeric_and_string(self):
         card = {"direction": "minimize"}

@@ -76,6 +76,9 @@ HARNESS_ERROR_HALT_AFTER = 3
 DEFAULT_ITERATION_CAP = 200
 DEFAULT_PRICING = {"in_per_mtok": 5.0, "out_per_mtok": 25.0}  # estimate only
 TIME_UNITS = {"ms", "s", "sec", "secs", "seconds", "ns", "us", "µs", "minutes", "min"}
+MAD_MIN_N = 4               # robust sigma (1.4826 * MAD) needs at least this many repeats
+MAD_SCALE = 1.4826
+MAX_MDE = 0.5               # a goal whose minimum detectable effect exceeds 50% is unusable on this host
 WALL_DIVERGENCE_INSTR = 0.5   # instrument claims at least 2x faster ...
 WALL_DIVERGENCE_WALL = 0.9    # ... while the process wall-clock barely moved
 
@@ -192,9 +195,21 @@ def median(xs: list) -> float:
 
 
 def sigma_of(xs: list) -> float | None:
+    """Noise floor estimator. n >= 4: 1.4826 * MAD (robust to the one-sided load bursts that
+    dominate timing on a shared machine); n in {2, 3}: sample stdev; n < 2: unknown."""
     if len(xs) < 2:
         return None
+    if len(xs) >= MAD_MIN_N:
+        m = statistics.median(xs)
+        mad = statistics.median([abs(x - m) for x in xs])
+        if mad > 0:
+            return float(MAD_SCALE * mad)
     return float(statistics.stdev(xs))
+
+
+def se_factor(n_new: int, n_base: int) -> float:
+    """The comparison is median-of-n_new vs median-of-n_base; scale sigma to that difference."""
+    return math.sqrt(1.0 / max(1, n_new) + 1.0 / max(1, n_base))
 
 
 def env_fingerprint() -> str:
@@ -794,16 +809,19 @@ def compare_metric(card: dict, base: dict | None, meas: dict, kappa_e: float, to
     res["delta"] = delta
     denom = abs(float(base["median"])) if float(base["median"]) != 0 else None
     res["rel"] = (delta / denom) if denom else None
+    n_new = int(meas.get("n_valid") or meas.get("n") or 1)
+    n_base = int(base.get("n") or 1)
+    res["se_factor"] = se_factor(n_new, n_base)
     if walls.get("noise_floor", True):
-        thr = kappa_e * sig
+        thr = kappa_e * sig * res["se_factor"]
         res["threshold"] = thr
         res["delta_sigma"] = (delta / sig) if sig > 0 else (math.inf if delta > 0 else (-math.inf if delta < 0 else 0.0))
         if card["kind"] == "goal":
             res["improved"] = delta > thr
-            res["regressed"] = delta < -tol * sig
+            res["regressed"] = delta < -tol * sig * res["se_factor"]
             res["inconclusive"] = (delta > 0) and not res["improved"]
         else:
-            res["regressed"] = delta < -tol * sig
+            res["regressed"] = delta < -tol * sig * res["se_factor"]
             res["improved"] = delta > thr
     else:  # naive: raw comparison, no noise floor
         res["threshold"] = 0.0
@@ -1152,7 +1170,7 @@ def cmd_baseline(home: Home, args) -> int:
             entry["measured_at"] = now_iso()
             entry["quarantined"] = not (conf and conf.get("median") is not None)
             baseline[mid] = entry
-            card["noise"] = {"sigma": entry["sigma"], "samples": conf.get("n") if conf else 0, "method": "stdev-of-repeats",
+            card["noise"] = {"sigma": entry["sigma"], "samples": conf.get("n") if conf else 0, "method": "mad-scaled" if (conf and (conf.get("n") or 0) >= MAD_MIN_N) else "stdev-of-repeats",
                              "measured_at": commit, "environment_fingerprint": env_fingerprint()}
             home.save_card(card)
     finally:
@@ -1281,6 +1299,28 @@ def campaign_start(home: Home, args) -> int:
             if home.load_card(m)["direction"] != "equal" and e.get("sigma") is None:
                 halt(home, home.campaign(), f"metric {m} has no measured sigma (need >=2 repeats)")
                 raise SBError(f"metric {m} has no measured sigma; campaign halted")
+        # minimum detectable effect per goal: the instrument must be able to see a plausible win
+        mdes = {}
+        for m in goals:
+            card = home.load_card(m)
+            if card["direction"] == "equal":
+                continue
+            e = b.get(m) or {}
+            conf = (e.get("levels") or {}).get("confirm") or {}
+            sig, med, n = e.get("sigma"), e.get("best"), int(conf.get("n") or BASELINE_REPEATS)
+            r = fidelity_spec(card, "confirm")["repeats"]
+            kap = float((card.get("acceptance") or {}).get("kappa", KAPPA))
+            if sig is not None and med not in (None, 0):
+                mdes[m] = kap * float(sig) * se_factor(r, n) / abs(float(med))
+        c2 = home.campaign()
+        c2["mde"] = mdes
+        home.save_campaign(c2)
+        for m, mde in mdes.items():
+            print(f"minimum detectable effect on {m}: {100 * mde:.1f}% (sigma {b[m]['sigma']:.4g} on {b[m]['best']:.4g}, confirm repeats {fidelity_spec(home.load_card(m), 'confirm')['repeats']})")
+            if mde > MAX_MDE and not args.allow_unusable:
+                halt(home, home.campaign(), f"instrument-unusable:{m}:mde={mde:.2f}")
+                raise SBError(f"goal {m} cannot detect effects smaller than {100 * mde:.0f}% on this host (max {100 * MAX_MDE:.0f}%); "
+                              f"raise repeats (-k / confirm.repeats), reduce machine load, or pass --allow-unusable. Campaign halted.")
     print(f"campaign {cid} started on branch {branch} at {commit[:8]}; walls={','.join(k for k, v in walls.items() if v) or 'none'}")
     return 0
 
@@ -2202,8 +2242,11 @@ def selftest() -> int:
     except SBError:
         check("missing metric raises", True)
     # stats
-    check("sigma_of", abs(sigma_of([1, 2, 3, 4]) - statistics.stdev([1, 2, 3, 4])) < 1e-9)
+    check("sigma_of n=3 is stdev", abs(sigma_of([1, 2, 3]) - statistics.stdev([1, 2, 3])) < 1e-9)
+    check("sigma_of n>=4 is MAD-scaled", abs(sigma_of([468, 489, 471, 758, 1206]) - 1.4826 * 21.0) < 0.01)
+    check("sigma_of robust to bursts", sigma_of([468, 489, 471, 758, 1206]) < 60 < statistics.stdev([468, 489, 471, 758, 1206]))
     check("sigma_of single", sigma_of([1]) is None)
+    check("se_factor", abs(se_factor(3, 5) - math.sqrt(1 / 3 + 1 / 5)) < 1e-12 and se_factor(1, 1) > 1.4)
     check("kappa_eff small diff", abs(kappa_eff(2.5, 0, 0) - 2.5) < 1e-9)
     check("kappa_eff grows with diff", kappa_eff(2.5, 400, 0) > kappa_eff(2.5, 40, 0) > 2.5)
     check("kappa_eff dep penalty", kappa_eff(2.5, 0, 1) == 3.5)
@@ -2217,8 +2260,8 @@ def selftest() -> int:
     goal = {"id": "g", "kind": "goal", "direction": "minimize"}
     guard = {"id": "h", "kind": "guardrail", "direction": "minimize"}
     eq = {"id": "q", "kind": "guardrail", "direction": "equal"}
-    base = {"median": 100.0, "sigma": 2.0}
-    c1 = compare_metric(goal, base, {"valid": True, "median": 90.0}, 2.5, 1.0, walls)
+    base = {"median": 100.0, "sigma": 2.0, "n": 5}
+    c1 = compare_metric(goal, base, {"valid": True, "median": 90.0, "n_valid": 3}, 2.5, 1.0, walls)
     check("goal improved beyond 2.5 sigma", c1["improved"] and not c1["regressed"])
     c2 = compare_metric(goal, base, {"valid": True, "median": 97.0}, 2.5, 1.0, walls)
     check("goal within noise is inconclusive", (not c2["improved"]) and c2["inconclusive"])
@@ -2280,7 +2323,7 @@ def selftest() -> int:
         spec = {"id": "t1", "goals": ["score"], "guardrails": ["tests_failed", "checks"], "budget": {"experiments": 6}, "plateau_patience": 2}
         sp = os.path.join(td, "c.json")
         write_json_atomic(sp, spec)
-        ns = argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=3)
+        ns = argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=False)
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_campaign(home, ns)
         c = home.campaign()
@@ -2437,7 +2480,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("profile"); sp.add_argument("action", choices=["write", "show"]); sp.add_argument("--file", default="-")
     sp = sub.add_parser("card"); sp.add_argument("action", choices=["add", "list", "validate", "show", "probe"]); sp.add_argument("id", nargs="?"); sp.add_argument("--file", default="-"); sp.add_argument("--repeats", type=int, default=2)
     sp = sub.add_parser("baseline"); sp.add_argument("--metric"); sp.add_argument("-k", "--repeats", type=int); sp.add_argument("--levels")
-    sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int)
+    sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int); sp.add_argument("--allow-unusable", action="store_true", help="start even if a goal's minimum detectable effect exceeds the usable limit")
     sp = sub.add_parser("next"); sp.add_argument("--json", action="store_true"); sp.add_argument("--seed", type=int)
     sp = sub.add_parser("prereg"); sp.add_argument("--file", default="-")
     sp = sub.add_parser("submit"); sp.add_argument("id")
