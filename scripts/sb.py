@@ -1564,10 +1564,12 @@ def cmd_judge_payload(home: Home, args) -> int:
              for comp in (js.get("comparisons") or [])]
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     checklist = os.path.join(root, "templates", "judge-checklist.md")
-    payload = {"experiment": eid, "campaign": c["id"], "prereg": {k: r.get(k) for k in ("operator", "target", "hypothesis", "predicted", "expected_diff_size", "mechanism", "prereg_hash")},
-               "diff": diff, "diff_lines": r.get("diff_lines"), "files": r.get("files"), "new_deps": r.get("new_deps"), "screen_comparisons": comps,
-               "anomaly": bool(js.get("anomaly")), "gaming_risks": risks, "frozen_paths": c.get("frozen_paths_effective"),
-               "checklist_path": checklist if os.path.exists(checklist) else None,
+    # Shape is the contract in agents/sb-judge.md and skills/_shared/judge-protocol.md.
+    payload = {"id": eid, "campaign": c["id"], "checklist": checklist if os.path.exists(checklist) else None,
+               "prereg": {k: r.get(k) for k in ("operator", "target", "hypothesis", "predicted", "mechanism", "expected_diff_size", "prereg_hash")},
+               "diff": {"lines": r.get("diff_lines"), "files": r.get("files"), "new_deps": r.get("new_deps"), "text": diff},
+               "screen": {"verdict": js.get("verdict"), "reason": js.get("reason"), "kappa_eff": js.get("kappa_eff"), "anomaly": bool(js.get("anomaly")), "comparisons": comps},
+               "gaming_risks": risks, "frozen_paths": c.get("frozen_paths_effective"), "protected_paths": protected_paths(home, c),
                "verdict_schema": {"verdict": "clean|suspicious|gamed", "pattern": "string", "evidence": "string", "recommended_check": "string"}}
     out = args.out or home.p("inbox", f"judge-{eid}.json")
     write_json_atomic(out, payload)
@@ -2404,7 +2406,7 @@ def selftest() -> int:
         with contextlib.redirect_stdout(out):
             cmd_judge_payload(home, argparse.Namespace(id=e1, out=None))
         jp = read_json(out.getvalue().strip())
-        check("judge payload has diff and no reasoning", "N = 20" in jp["diff"] and "reasoning" not in json.dumps(jp) and "hypothesis" in jp["prereg"])
+        check("judge payload has diff and no reasoning", "N = 20" in jp["diff"]["text"] and "reasoning" not in json.dumps(jp) and "hypothesis" in jp["prereg"] and jp["id"] == e1 and "comparisons" in jp["screen"])
         check("strip_comments", strip_comments({"a": 1, "_comment": "x", "b": {"_comment_c": 1, "d": [{"_comment": 2, "e": 3}]}}) == {"a": 1, "b": {"d": [{"e": 3}]}})
         vp = os.path.join(td, "v.json")
         write_json_atomic(vp, {"verdict": "clean", "pattern": "", "evidence": "", "recommended_check": ""})
