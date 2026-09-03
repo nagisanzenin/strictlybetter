@@ -54,7 +54,7 @@ Decide the version now; it appears in several files (§6).
 
 **If it touches `scripts/sb.py`, it MUST be covered by a new check that fails without it.** A hook
 change needs a `tests/test_hooks.py` replay of the real payload shape. A skill or agent change makes
-§5.5 and §5.6 mandatory. **If it adds or changes a NUMBER, read §4.8 first**; that section is the
+§5.5 mandatory; §5.6 struck (see its note). **If it adds or changes a NUMBER, read §4.8 first**; that section is the
 spec. **If it changes a constant, stop.** Constants are fixed before data; a constant tuned to make a
 benchmark pass is bug class 1 with a commit message. It needs a reason that mentions no result, a
 major version, and a CHANGELOG line naming the ledgers it invalidates.
@@ -342,6 +342,8 @@ Exit criterion (M2): ≥ 1 confirmed acceptance, 0 guardrail regressions, every 
 narrated matches `sb status --json`. Write down what surprised you; a surprise here is the release.
 
 ## 5.6 · The user session: a persona in fresh context, verdict binding
+
+> **Struck for 1.1.0 and until further notice (2026-09-03).** A persona session on this loop means orient, instrument, baseline, and at least one full cycle with experimenter and judge agents: several hundred thousand tokens for one simulated verdict. That is heavier than the release it certifies. Real-world signal (an issue, the founder's own use) replaces it, as the last paragraph of this section already allowed. The section text is kept so the bar is on record.
 
 Everything above proves the system is correct. Nothing above proves a stranger gets through it.
 

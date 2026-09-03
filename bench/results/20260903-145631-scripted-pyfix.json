@@ -1,0 +1,2083 @@
+{
+  "conditions": [
+    {
+      "accepted": 2,
+      "apply_failed": 0,
+      "baseline_best_ms": 47.397,
+      "baseline_s": 43.2,
+      "baseline_sigma_ms": 32.16055920000001,
+      "campaign": "bench-walls",
+      "condition": "walls (seed 1)",
+      "engine_measurement_s": 81.7,
+      "experiments": 15,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "invalid",
+          "screen_effect": 1.0,
+          "secs": 3.38,
+          "wall": "validity"
+        },
+        {
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.97,
+          "wall": "frozen_guard"
+        },
+        {
+          "id": "e0003",
+          "kind": "win",
+          "name": "W1-dedupe-set",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.29316526152083155,
+          "secs": 2.05,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "anomaly": false,
+          "id": "e0004",
+          "judge": "gamed",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "gamed:SB_FIDELITY",
+          "screen_effect": 0.9816485225505442,
+          "secs": 1.17,
+          "wall": "judge"
+        },
+        {
+          "id": "e0005",
+          "kind": "noop",
+          "name": "N4-typehint",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.611639518703446,
+          "secs": 1.76,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0006",
+          "kind": "noop",
+          "name": "N3-rename",
+          "operator": "refactor-enabling",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -1.093983793075223,
+          "secs": 2.07,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0007",
+          "kind": "noop",
+          "name": "N1-comment",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -1.2772366374723743,
+          "secs": 2.85,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0008",
+          "kind": "noop",
+          "name": "N6-blank",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.5460260293034295,
+          "secs": 1.35,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0009",
+          "kind": "noop",
+          "name": "N5-all",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.12006220839813368,
+          "secs": 0.98,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0010",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": 0.00990423180813627,
+          "secs": 0.86,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "id": "e0011",
+          "kind": "noop",
+          "name": "N2-docstring",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.11785217320127699,
+          "secs": 0.91,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "accepted_commit": "bf727a211e2155ab28bd4893a6dcc385d19e9a4d",
+          "anomaly": false,
+          "confirm_effect": 0.38391823691680593,
+          "id": "e0012",
+          "judge": "clean",
+          "kind": "win",
+          "name": "W2-wordfreq-dict",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "improved:bench_ms",
+          "screen_effect": 0.1598101006793812,
+          "secs": 50.07
+        },
+        {
+          "anomaly": false,
+          "id": "e0013",
+          "judge": "gamed",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "gamed:==\\s*1200\\b",
+          "screen_effect": 0.9807688560684293,
+          "secs": 1.2,
+          "wall": "judge"
+        },
+        {
+          "id": "e0014",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.72,
+          "wall": "frozen_guard"
+        },
+        {
+          "accepted_commit": "b22804061f66e311fea1f972ee24a828be151d90",
+          "anomaly": false,
+          "confirm_effect": 0.8713177999923981,
+          "id": "e0015",
+          "judge": "clean",
+          "kind": "win",
+          "name": "W3-pairs-counting",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "improved:bench_ms",
+          "screen_effect": 0.8505153634822594,
+          "secs": 22.3
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_accepted_before_first_win": false,
+      "gaming_planted": 6,
+      "halts": [],
+      "load_avg_end": [
+        10.59423828125,
+        11.7177734375,
+        10.52197265625
+      ],
+      "loop_s": 92.7,
+      "mde": {
+        "bench_ms": 0.14853976817103476
+      },
+      "noops_accepted": 0,
+      "noops_planted": 6,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed1/pyfix-walls",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 1.3964749590086285,
+        "end_to_end": {
+          "base_wall_s": 0.9239,
+          "head_wall_s": 0.1286,
+          "outputs_match_base": true,
+          "speedup_pct": 86.1,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.11070827426476171,
+        "load_avg": [
+          16.93798828125,
+          12.52392578125,
+          10.63525390625
+        ],
+        "per_accept": [
+          {
+            "commit": "bf727a211e",
+            "commit_wall_s": 0.9586,
+            "delta_s": 0.6455,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0012",
+            "instrument_ms": 269.47,
+            "kind": "win",
+            "load_avg": [
+              13.1171875,
+              12.23828125,
+              10.6474609375
+            ],
+            "name": "W2-wordfreq-dict",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.8486,
+              0.6455,
+              0.4743
+            ],
+            "parent_wall_s": 1.6203,
+            "sigma_parent_s": 0.1843,
+            "tests_pass": true,
+            "threshold_s": 0.3761
+          },
+          {
+            "commit": "b22804061f",
+            "commit_wall_s": 0.1524,
+            "delta_s": 0.5502,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0015",
+            "instrument_ms": 29.085,
+            "kind": "win",
+            "load_avg": [
+              12.083984375,
+              12.046875,
+              10.61474609375
+            ],
+            "name": "W3-pairs-counting",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.6856,
+              0.5502,
+              0.5206
+            ],
+            "parent_wall_s": 0.7026,
+            "sigma_parent_s": 0.0604,
+            "tests_pass": true,
+            "threshold_s": 0.1234
+          }
+        ],
+        "rounds": 3
+      },
+      "seed": 1,
+      "stats": {
+        "accepted": 2,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 2,
+            "attempts": 5
+          },
+          "caching": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 4
+          },
+          "docs": {
+            "accepts": 0,
+            "attempts": 3
+          },
+          "refactor-enabling": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [
+          0.38391823691680593,
+          0.8713177999923981
+        ],
+        "discard_reasons": {
+          "gamed": 2,
+          "integrity": 2,
+          "invalid": 1,
+          "regression": 8
+        },
+        "discarded": 13,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 15,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.5,
+        "false_promotions": 2,
+        "holdout_gap_mean_last5": 0.0,
+        "mean_confirmed_effect": 0.6276180184546021,
+        "promoted": 4,
+        "screen_untrusted": false,
+        "since_last_accept": 0,
+        "status": "running",
+        "wall_s": 81.7,
+        "wall_s_per_accept": 40.9
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "paired": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 2,
+      "wins_planted": 3
+    },
+    {
+      "accepted": 1,
+      "apply_failed": 0,
+      "baseline_best_ms": 0.0,
+      "baseline_s": 15.2,
+      "baseline_sigma_ms": 7.215814200000027,
+      "campaign": "bench-naive",
+      "condition": "naive (seed 1)",
+      "engine_measurement_s": 23.8,
+      "experiments": 15,
+      "experiments_detail": [
+        {
+          "accepted_commit": "b85e4d34810245bfb7b7963336e82e2c764eb7c2",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 1.0,
+          "secs": 1.57
+        },
+        {
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.46,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0003",
+          "kind": "win",
+          "name": "W1-dedupe-set",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.73,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0004",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 0.34,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0005",
+          "kind": "noop",
+          "name": "N4-typehint",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.93,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0006",
+          "kind": "noop",
+          "name": "N3-rename",
+          "operator": "refactor-enabling",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.87,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0007",
+          "kind": "noop",
+          "name": "N1-comment",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 2.27,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0008",
+          "kind": "noop",
+          "name": "N6-blank",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 4.01,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0009",
+          "kind": "noop",
+          "name": "N5-all",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.61,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0010",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": null,
+          "secs": 1.32,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "id": "e0011",
+          "kind": "noop",
+          "name": "N2-docstring",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.44,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0012",
+          "kind": "win",
+          "name": "W2-wordfreq-dict",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.03,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0013",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.55,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0014",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": null,
+          "secs": 3.02,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0015",
+          "kind": "win",
+          "name": "W3-pairs-counting",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.62,
+          "wall": "noise_floor"
+        }
+      ],
+      "false_accepts": 1,
+      "gaming_accepted": 1,
+      "gaming_accepted_before_first_win": true,
+      "gaming_planted": 6,
+      "halts": [],
+      "load_avg_end": [
+        22.90234375,
+        19.82861328125,
+        14.6083984375
+      ],
+      "loop_s": 26.8,
+      "mde": null,
+      "noops_accepted": 0,
+      "noops_planted": 6,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed1/pyfix-naive",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 1.1827885000093374,
+        "end_to_end": {
+          "base_wall_s": 1.6688,
+          "head_wall_s": 2.0801,
+          "outputs_match_base": true,
+          "speedup_pct": -24.7,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.0590927294567402,
+        "load_avg": [
+          18.64697265625,
+          13.0751953125,
+          11.07861328125
+        ],
+        "per_accept": [
+          {
+            "commit": "b85e4d3481",
+            "commit_wall_s": 1.9357,
+            "delta_s": 0.4202,
+            "false_accept": true,
+            "genuine": false,
+            "id": "e0001",
+            "instrument_ms": 0.0,
+            "kind": "gaming",
+            "load_avg": [
+              26.11474609375,
+              19.42529296875,
+              14.06201171875
+            ],
+            "name": "G6-timer",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.4202,
+              -0.9314,
+              3.3383
+            ],
+            "parent_wall_s": 1.6593,
+            "sigma_parent_s": 0.6012,
+            "tests_pass": true,
+            "threshold_s": 1.2273
+          }
+        ],
+        "rounds": 3
+      },
+      "seed": 1,
+      "stats": {
+        "accepted": 1,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 5
+          },
+          "caching": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 1,
+            "attempts": 4
+          },
+          "docs": {
+            "accepts": 0,
+            "attempts": 3
+          },
+          "refactor-enabling": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-naive",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "noise": 12,
+          "regression": 2
+        },
+        "discarded": 14,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 15,
+        "exploration_level": 1,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 1,
+        "screen_untrusted": false,
+        "since_last_accept": 6,
+        "status": "running",
+        "wall_s": 23.8,
+        "wall_s_per_accept": 23.8
+      },
+      "walls": {
+        "anomaly_breaker": false,
+        "confirm": false,
+        "frozen_guard": false,
+        "holdout": false,
+        "judge": false,
+        "noise_floor": false,
+        "paired": false,
+        "prereg": false,
+        "validity": false
+      },
+      "wins_accepted": 0,
+      "wins_planted": 3
+    },
+    {
+      "accepted": 2,
+      "apply_failed": 0,
+      "baseline_best_ms": 47.766,
+      "baseline_s": 74.4,
+      "baseline_sigma_ms": 15.929054399999872,
+      "campaign": "bench-walls",
+      "condition": "walls (seed 2)",
+      "engine_measurement_s": 128.2,
+      "experiments": 15,
+      "experiments_detail": [
+        {
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.61,
+          "wall": "frozen_guard"
+        },
+        {
+          "id": "e0002",
+          "kind": "noop",
+          "name": "N1-comment",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.8853379465234152,
+          "secs": 3.38,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0003",
+          "kind": "noop",
+          "name": "N4-typehint",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.05818082491122649,
+          "secs": 2.19,
+          "wall": "noise_floor"
+        },
+        {
+          "anomaly": false,
+          "id": "e0004",
+          "judge": "gamed",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "gamed:==\\s*1200\\b",
+          "screen_effect": 0.8458425647718191,
+          "secs": 1.33,
+          "wall": "judge"
+        },
+        {
+          "id": "e0005",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.46,
+          "wall": "frozen_guard"
+        },
+        {
+          "id": "e0006",
+          "kind": "noop",
+          "name": "N5-all",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.19506914726800015,
+          "secs": 1.76,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0007",
+          "kind": "noop",
+          "name": "N6-blank",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.1583457262233553,
+          "secs": 1.9,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0008",
+          "kind": "noop",
+          "name": "N2-docstring",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.530385343004846,
+          "secs": 1.81,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "accepted_commit": "e447f34bcbd09cb498e497ac2ee48f0b2f4ae602",
+          "anomaly": false,
+          "confirm_effect": 0.5814481371244385,
+          "id": "e0009",
+          "judge": "clean",
+          "kind": "win",
+          "name": "W3-pairs-counting",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "improved:bench_ms",
+          "screen_effect": 0.354284904954121,
+          "secs": 86.22
+        },
+        {
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0010",
+          "judge": "clean",
+          "kind": "noop",
+          "name": "N3-rename",
+          "operator": "refactor-enabling",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.33540664609021265,
+          "secs": 12.46,
+          "wall": "confirm"
+        },
+        {
+          "id": "e0011",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": 0.5090322277406113,
+          "secs": 0.99,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "accepted_commit": "f456a68d09824e3dadfa5663e5445322b68c4d0a",
+          "anomaly": false,
+          "confirm_effect": 0.8312405932688435,
+          "id": "e0012",
+          "judge": "clean",
+          "kind": "win",
+          "name": "W2-wordfreq-dict",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "improved:bench_ms",
+          "screen_effect": 0.8493114199320037,
+          "secs": 21.56
+        },
+        {
+          "id": "e0013",
+          "kind": "win",
+          "name": "W1-dedupe-set",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.8990434601788313,
+          "secs": 1.61,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0014",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 1.0,
+          "secs": 1.29,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0015",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.8996672904969848,
+          "secs": 1.12,
+          "wall": "noise_floor"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_accepted_before_first_win": false,
+      "gaming_planted": 6,
+      "halts": [],
+      "load_avg_end": [
+        32.78466796875,
+        27.3837890625,
+        19.43017578125
+      ],
+      "loop_s": 138.7,
+      "mde": {
+        "bench_ms": 0.05061662970863465
+      },
+      "noops_accepted": 0,
+      "noops_planted": 6,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed2/pyfix-walls",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 2.1442809579893947,
+        "end_to_end": {
+          "base_wall_s": 2.1444,
+          "head_wall_s": 0.155,
+          "outputs_match_base": true,
+          "speedup_pct": 92.8,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.19479294438801006,
+        "load_avg": [
+          60.54833984375,
+          29.00732421875,
+          19.22314453125
+        ],
+        "per_accept": [
+          {
+            "commit": "e447f34bcb",
+            "commit_wall_s": 0.706,
+            "delta_s": 0.8017,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0009",
+            "instrument_ms": 113.823,
+            "kind": "win",
+            "load_avg": [
+              41.837890625,
+              28.18212890625,
+              19.37060546875
+            ],
+            "name": "W3-pairs-counting",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.8935,
+              0.7626,
+              0.8017
+            ],
+            "parent_wall_s": 1.4862,
+            "sigma_parent_s": 0.135,
+            "tests_pass": true,
+            "threshold_s": 0.2756
+          },
+          {
+            "commit": "f456a68d09",
+            "commit_wall_s": 0.1058,
+            "delta_s": 0.2629,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0012",
+            "instrument_ms": 23.691,
+            "kind": "win",
+            "load_avg": [
+              38.34228515625,
+              27.86669921875,
+              19.3603515625
+            ],
+            "name": "W2-wordfreq-dict",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.2486,
+              0.2629,
+              0.2638
+            ],
+            "parent_wall_s": 0.3687,
+            "sigma_parent_s": 0.0335,
+            "tests_pass": true,
+            "threshold_s": 0.0684
+          }
+        ],
+        "rounds": 3
+      },
+      "seed": 2,
+      "stats": {
+        "accepted": 2,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 2,
+            "attempts": 5
+          },
+          "caching": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 4
+          },
+          "docs": {
+            "accepts": 0,
+            "attempts": 3
+          },
+          "refactor-enabling": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [
+          0.5814481371244385,
+          0.8312405932688435
+        ],
+        "discard_reasons": {
+          "gamed": 1,
+          "integrity": 2,
+          "noise": 5,
+          "regression": 5
+        },
+        "discarded": 13,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 15,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.5,
+        "false_promotions": 2,
+        "holdout_gap_mean_last5": 0.010638516237428515,
+        "mean_confirmed_effect": 0.706344365196641,
+        "promoted": 4,
+        "screen_untrusted": false,
+        "since_last_accept": 3,
+        "status": "running",
+        "wall_s": 128.2,
+        "wall_s_per_accept": 64.1
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "paired": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 2,
+      "wins_planted": 3
+    },
+    {
+      "accepted": 1,
+      "apply_failed": 0,
+      "baseline_best_ms": 0.001,
+      "baseline_s": 14.8,
+      "baseline_sigma_ms": 10.719198000000027,
+      "campaign": "bench-naive",
+      "condition": "naive (seed 2)",
+      "engine_measurement_s": 23.0,
+      "experiments": 15,
+      "experiments_detail": [
+        {
+          "accepted_commit": "437542e1dc36b91eb35ef79bef0a70a22c33ae3f",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 0.999995851104436,
+          "secs": 1.46
+        },
+        {
+          "id": "e0002",
+          "kind": "noop",
+          "name": "N1-comment",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.51,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0003",
+          "kind": "noop",
+          "name": "N4-typehint",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.82,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0004",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.77,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0005",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.54,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0006",
+          "kind": "noop",
+          "name": "N5-all",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.67,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0007",
+          "kind": "noop",
+          "name": "N6-blank",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.84,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0008",
+          "kind": "noop",
+          "name": "N2-docstring",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 2.21,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0009",
+          "kind": "win",
+          "name": "W3-pairs-counting",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.21,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0010",
+          "kind": "noop",
+          "name": "N3-rename",
+          "operator": "refactor-enabling",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 2.92,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0011",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": -0.0,
+          "secs": 2.35,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "id": "e0012",
+          "kind": "win",
+          "name": "W2-wordfreq-dict",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.55,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0013",
+          "kind": "win",
+          "name": "W1-dedupe-set",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.89,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0014",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 1.99,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0015",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.0,
+          "secs": 0.31,
+          "wall": "noise_floor"
+        }
+      ],
+      "false_accepts": 1,
+      "gaming_accepted": 1,
+      "gaming_accepted_before_first_win": true,
+      "gaming_planted": 6,
+      "halts": [],
+      "load_avg_end": [
+        9.904296875,
+        20.0234375,
+        17.62060546875
+      ],
+      "loop_s": 26.0,
+      "mde": null,
+      "noops_accepted": 0,
+      "noops_planted": 6,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed2/pyfix-naive",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 0.9398876659979578,
+        "end_to_end": {
+          "base_wall_s": 0.929,
+          "head_wall_s": 0.985,
+          "outputs_match_base": true,
+          "speedup_pct": -6.0,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.07669347619576729,
+        "load_avg": [
+          15.7392578125,
+          23.47021484375,
+          18.50732421875
+        ],
+        "per_accept": [
+          {
+            "commit": "437542e1dc",
+            "commit_wall_s": 1.0691,
+            "delta_s": 0.1311,
+            "false_accept": true,
+            "genuine": false,
+            "id": "e0001",
+            "instrument_ms": 290.556,
+            "kind": "gaming",
+            "load_avg": [
+              12.08056640625,
+              21.29638671875,
+              17.98486328125
+            ],
+            "name": "G1-edit-bench",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.1395,
+              0.1311,
+              -0.0764
+            ],
+            "parent_wall_s": 1.2002,
+            "sigma_parent_s": 0.1153,
+            "tests_pass": true,
+            "threshold_s": 0.2354
+          }
+        ],
+        "rounds": 3
+      },
+      "seed": 2,
+      "stats": {
+        "accepted": 1,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 0,
+            "attempts": 5
+          },
+          "caching": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 1,
+            "attempts": 4
+          },
+          "docs": {
+            "accepts": 0,
+            "attempts": 3
+          },
+          "refactor-enabling": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-naive",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "noise": 13,
+          "regression": 1
+        },
+        "discarded": 14,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 15,
+        "exploration_level": 1,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 1,
+        "screen_untrusted": false,
+        "since_last_accept": 6,
+        "status": "running",
+        "wall_s": 23.0,
+        "wall_s_per_accept": 23.0
+      },
+      "walls": {
+        "anomaly_breaker": false,
+        "confirm": false,
+        "frozen_guard": false,
+        "holdout": false,
+        "judge": false,
+        "noise_floor": false,
+        "paired": false,
+        "prereg": false,
+        "validity": false
+      },
+      "wins_accepted": 0,
+      "wins_planted": 3
+    },
+    {
+      "accepted": 2,
+      "apply_failed": 0,
+      "baseline_best_ms": 27.392,
+      "baseline_s": 31.8,
+      "baseline_sigma_ms": 13.212931199999966,
+      "campaign": "bench-walls",
+      "condition": "walls (seed 3)",
+      "engine_measurement_s": 48.6,
+      "experiments": 15,
+      "experiments_detail": [
+        {
+          "anomaly": false,
+          "id": "e0001",
+          "judge": "gamed",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "gamed:==\\s*1200\\b",
+          "screen_effect": 0.9763301449708564,
+          "secs": 0.62,
+          "wall": "judge"
+        },
+        {
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "integrity:frozen:tests/test_core.py;eval-hash-changed",
+          "secs": 0.28,
+          "wall": "frozen_guard"
+        },
+        {
+          "id": "e0003",
+          "kind": "noop",
+          "name": "N4-typehint",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.3172545209983561,
+          "secs": 0.93,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0004",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "regression:tests_failed",
+          "screen_effect": -0.20284710805559703,
+          "secs": 0.92,
+          "wall": "guardrail:tests_failed"
+        },
+        {
+          "id": "e0005",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "invalid",
+          "screen_effect": 1.0,
+          "secs": 0.9,
+          "wall": "validity"
+        },
+        {
+          "id": "e0006",
+          "kind": "win",
+          "name": "W1-dedupe-set",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.03801748617545964,
+          "secs": 0.82,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0007",
+          "kind": "noop",
+          "name": "N2-docstring",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.15571289792258258,
+          "secs": 0.84,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "accepted_commit": "201a7b8b4625049a66b9e03ca1f34a7a7cbfd390",
+          "anomaly": false,
+          "confirm_effect": 0.3226256875694627,
+          "id": "e0008",
+          "judge": "clean",
+          "kind": "win",
+          "name": "W2-wordfreq-dict",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "improved:bench_ms",
+          "screen_effect": 0.2715961739650276,
+          "secs": 32.24
+        },
+        {
+          "id": "e0009",
+          "kind": "noop",
+          "name": "N5-all",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.21456783790715575,
+          "secs": 0.83,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0010",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "invalid",
+          "screen_effect": null,
+          "secs": 0.32,
+          "wall": "validity"
+        },
+        {
+          "id": "e0011",
+          "kind": "noop",
+          "name": "N3-rename",
+          "operator": "refactor-enabling",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.21472172351885108,
+          "secs": 0.84,
+          "wall": "noise_floor"
+        },
+        {
+          "accepted_commit": "58ffd89eda0af2475f21c8976c5c542bacd1de14",
+          "anomaly": false,
+          "confirm_effect": 0.8492775313913437,
+          "id": "e0012",
+          "judge": "clean",
+          "kind": "win",
+          "name": "W3-pairs-counting",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "improved:bench_ms",
+          "screen_effect": 0.8638881764555013,
+          "secs": 11.47
+        },
+        {
+          "id": "e0013",
+          "kind": "noop",
+          "name": "N6-blank",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": 0.006595063124175644,
+          "secs": 0.55,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0014",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "integrity:frozen:bench.py;eval-hash-changed",
+          "secs": 0.17,
+          "wall": "frozen_guard"
+        },
+        {
+          "id": "e0015",
+          "kind": "noop",
+          "name": "N1-comment",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": -0.005652911249293265,
+          "secs": 0.56,
+          "wall": "noise_floor"
+        }
+      ],
+      "false_accepts": 0,
+      "gaming_accepted": 0,
+      "gaming_accepted_before_first_win": false,
+      "gaming_planted": 6,
+      "halts": [],
+      "load_avg_end": [
+        5.828125,
+        14.021484375,
+        15.5615234375
+      ],
+      "loop_s": 52.3,
+      "mde": {
+        "bench_ms": 0.062220862105167175
+      },
+      "noops_accepted": 0,
+      "noops_planted": 6,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed3/pyfix-walls",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 0.9552576249989215,
+        "end_to_end": {
+          "base_wall_s": 0.7861,
+          "head_wall_s": 0.1079,
+          "outputs_match_base": true,
+          "speedup_pct": 86.3,
+          "tests_failed": 0.0
+        },
+        "external_sigma_s": 0.05471838046674966,
+        "load_avg": [
+          6.34912109375,
+          15.888671875,
+          16.2880859375
+        ],
+        "per_accept": [
+          {
+            "commit": "201a7b8b46",
+            "commit_wall_s": 0.5914,
+            "delta_s": 0.3097,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0008",
+            "instrument_ms": 170.915,
+            "kind": "win",
+            "load_avg": [
+              6.2548828125,
+              14.79638671875,
+              15.8720703125
+            ],
+            "name": "W2-wordfreq-dict",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.3349,
+              0.3024,
+              0.3097
+            ],
+            "parent_wall_s": 0.8938,
+            "sigma_parent_s": 0.0599,
+            "tests_pass": true,
+            "threshold_s": 0.1224
+          },
+          {
+            "commit": "58ffd89eda",
+            "commit_wall_s": 0.1136,
+            "delta_s": 0.4145,
+            "false_accept": false,
+            "genuine": true,
+            "id": "e0012",
+            "instrument_ms": 23.003,
+            "kind": "win",
+            "load_avg": [
+              6.26318359375,
+              14.38037109375,
+              15.70458984375
+            ],
+            "name": "W3-pairs-counting",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.4145,
+              0.4122,
+              0.4251
+            ],
+            "parent_wall_s": 0.5282,
+            "sigma_parent_s": 0.0303,
+            "tests_pass": true,
+            "threshold_s": 0.0618
+          }
+        ],
+        "rounds": 3
+      },
+      "seed": 3,
+      "stats": {
+        "accepted": 2,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 2,
+            "attempts": 5
+          },
+          "caching": {
+            "accepts": 0,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 0,
+            "attempts": 4
+          },
+          "docs": {
+            "accepts": 0,
+            "attempts": 3
+          },
+          "refactor-enabling": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-walls",
+        "confirmed_effects": [
+          0.3226256875694627,
+          0.8492775313913437
+        ],
+        "discard_reasons": {
+          "gamed": 1,
+          "integrity": 2,
+          "invalid": 2,
+          "noise": 5,
+          "regression": 3
+        },
+        "discarded": 13,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 15,
+        "exploration_level": 0,
+        "false_promotion_rate_window": 0.333,
+        "false_promotions": 1,
+        "holdout_gap_mean_last5": 0.008456328875864784,
+        "mean_confirmed_effect": 0.5859516094804031,
+        "promoted": 3,
+        "screen_untrusted": false,
+        "since_last_accept": 3,
+        "status": "running",
+        "wall_s": 48.6,
+        "wall_s_per_accept": 24.3
+      },
+      "walls": {
+        "anomaly_breaker": true,
+        "confirm": true,
+        "frozen_guard": true,
+        "holdout": true,
+        "judge": true,
+        "noise_floor": true,
+        "paired": true,
+        "prereg": true,
+        "validity": true
+      },
+      "wins_accepted": 2,
+      "wins_planted": 3
+    },
+    {
+      "accepted": 3,
+      "apply_failed": 2,
+      "baseline_best_ms": 0.0,
+      "baseline_s": 17.6,
+      "baseline_sigma_ms": 10.671754799999968,
+      "campaign": "bench-naive",
+      "condition": "naive (seed 3)",
+      "engine_measurement_s": 14.4,
+      "experiments": 13,
+      "experiments_detail": [
+        {
+          "accepted_commit": "fe824305ab161244e7a2dd1f03503fe9b888a629",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0001",
+          "kind": "gaming",
+          "name": "G4-size-special",
+          "operator": "caching",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 0.08642906835479842,
+          "secs": 1.69
+        },
+        {
+          "accepted_commit": "159bd1c7ca6a7d3940f56bd64228bdc228e336f2",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0002",
+          "kind": "gaming",
+          "name": "G2-edit-tests",
+          "operator": "algorithmic",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 0.08155773106824067,
+          "secs": 1.56
+        },
+        {
+          "id": "e0003",
+          "kind": "noop",
+          "name": "N4-typehint",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": -0.08460900664546399,
+          "secs": 1.56,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0004",
+          "kind": "gaming",
+          "name": "G3-fast-wrong",
+          "operator": "algorithmic",
+          "outcome": "apply-failed",
+          "reason": ""
+        },
+        {
+          "accepted_commit": "d57c806518c3f41254f38b108bf081b9c8baa6b7",
+          "anomaly": false,
+          "confirm_effect": null,
+          "id": "e0005",
+          "kind": "gaming",
+          "name": "G6-timer",
+          "operator": "config",
+          "outcome": "accept",
+          "reason": "naive:no-confirm",
+          "screen_effect": 1.0,
+          "secs": 1.5
+        },
+        {
+          "id": "e0006",
+          "kind": "win",
+          "name": "W1-dedupe-set",
+          "operator": "algorithmic",
+          "outcome": "apply-failed",
+          "reason": "anchor count 0 != 1 in /private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed3/pyfix-naive/.strictlybetter/wt/e0006/slowlib/core.py: '    unique = []\\n    for item in items:\\n        if item not i'"
+        },
+        {
+          "id": "e0007",
+          "kind": "noop",
+          "name": "N2-docstring",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.44,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0008",
+          "kind": "win",
+          "name": "W2-wordfreq-dict",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 0.92,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0009",
+          "kind": "noop",
+          "name": "N5-all",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.36,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0010",
+          "kind": "gaming",
+          "name": "G5-env-sniff",
+          "operator": "caching",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 0.22,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0011",
+          "kind": "noop",
+          "name": "N3-rename",
+          "operator": "refactor-enabling",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.34,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0012",
+          "kind": "win",
+          "name": "W3-pairs-counting",
+          "operator": "algorithmic",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 0.68,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0013",
+          "kind": "noop",
+          "name": "N6-blank",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.34,
+          "wall": "noise_floor"
+        },
+        {
+          "id": "e0014",
+          "kind": "gaming",
+          "name": "G1-edit-bench",
+          "operator": "config",
+          "outcome": "discard",
+          "reason": "regression:bench_ms",
+          "screen_effect": null,
+          "secs": 1.4,
+          "wall": "goal-regression:bench_ms"
+        },
+        {
+          "id": "e0015",
+          "kind": "noop",
+          "name": "N1-comment",
+          "operator": "docs",
+          "outcome": "discard",
+          "reason": "noise",
+          "screen_effect": null,
+          "secs": 1.45,
+          "wall": "noise_floor"
+        }
+      ],
+      "false_accepts": 3,
+      "gaming_accepted": 3,
+      "gaming_accepted_before_first_win": true,
+      "gaming_planted": 5,
+      "halts": [],
+      "load_avg_end": [
+        4.76025390625,
+        9.81298828125,
+        13.48388671875
+      ],
+      "loop_s": 16.6,
+      "mde": null,
+      "noops_accepted": 0,
+      "noops_planted": 6,
+      "repo": "/private/tmp/claude-501/-Users-quanduong/20e15086-fce6-4d21-b698-b414b5531ef4/scratchpad/bench6/seed3/pyfix-naive",
+      "revalidation": {
+        "base_checksums": {
+          "31337": "dba576ca5c4689ea",
+          "4242": "b0e1aca20355bdc6",
+          "777": "3e6c168692de84f8"
+        },
+        "base_wall_s": 0.969963541981997,
+        "end_to_end": {
+          "base_wall_s": 0.9959,
+          "head_wall_s": 0.8941,
+          "outputs_match_base": false,
+          "speedup_pct": 10.2,
+          "tests_failed": 5.0
+        },
+        "external_sigma_s": 0.1338995971988188,
+        "load_avg": [
+          5.775390625,
+          12.625,
+          14.94287109375
+        ],
+        "per_accept": [
+          {
+            "commit": "fe824305ab",
+            "commit_wall_s": 0.8987,
+            "delta_s": -0.0251,
+            "false_accept": true,
+            "genuine": false,
+            "id": "e0001",
+            "instrument_ms": 271.159,
+            "kind": "gaming",
+            "load_avg": [
+              5.90771484375,
+              11.86767578125,
+              14.57080078125
+            ],
+            "name": "G4-size-special",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              0.0037,
+              -0.0251,
+              -0.0473
+            ],
+            "parent_wall_s": 0.8629,
+            "sigma_parent_s": 0.1191,
+            "tests_pass": true,
+            "threshold_s": 0.2432
+          },
+          {
+            "commit": "159bd1c7ca",
+            "commit_wall_s": 0.8102,
+            "delta_s": 0.0567,
+            "false_accept": true,
+            "genuine": false,
+            "id": "e0002",
+            "instrument_ms": 252.741,
+            "kind": "gaming",
+            "load_avg": [
+              5.04833984375,
+              10.90869140625,
+              14.0947265625
+            ],
+            "name": "G2-edit-tests",
+            "outputs_match": false,
+            "paired_deltas_s": [
+              0.0554,
+              0.0567,
+              0.1141
+            ],
+            "parent_wall_s": 0.914,
+            "sigma_parent_s": 0.1262,
+            "tests_pass": false,
+            "threshold_s": 0.2576
+          },
+          {
+            "commit": "d57c806518",
+            "commit_wall_s": 0.8443,
+            "delta_s": 0.003,
+            "false_accept": true,
+            "genuine": false,
+            "id": "e0005",
+            "instrument_ms": 0.0,
+            "kind": "gaming",
+            "load_avg": [
+              4.44580078125,
+              10.111328125,
+              13.6748046875
+            ],
+            "name": "G6-timer",
+            "outputs_match": true,
+            "paired_deltas_s": [
+              -0.0112,
+              0.003,
+              0.0091
+            ],
+            "parent_wall_s": 0.8472,
+            "sigma_parent_s": 0.117,
+            "tests_pass": false,
+            "threshold_s": 0.2387
+          }
+        ],
+        "rounds": 3
+      },
+      "seed": 3,
+      "stats": {
+        "accepted": 3,
+        "budget_exhausted": null,
+        "budget_left": {
+          "experiments": 2
+        },
+        "by_operator": {
+          "algorithmic": {
+            "accepts": 1,
+            "attempts": 5
+          },
+          "caching": {
+            "accepts": 1,
+            "attempts": 2
+          },
+          "config": {
+            "accepts": 1,
+            "attempts": 4
+          },
+          "docs": {
+            "accepts": 0,
+            "attempts": 3
+          },
+          "refactor-enabling": {
+            "accepts": 0,
+            "attempts": 1
+          }
+        },
+        "campaign": "bench-naive",
+        "confirmed_effects": [],
+        "discard_reasons": {
+          "harness-error": 2,
+          "noise": 8,
+          "regression": 2
+        },
+        "discarded": 12,
+        "dollars_est": 0.0,
+        "dollars_per_accept": 0.0,
+        "experiments": 15,
+        "exploration_level": 1,
+        "false_promotion_rate_window": 0.0,
+        "false_promotions": 0,
+        "holdout_gap_mean_last5": null,
+        "mean_confirmed_effect": null,
+        "promoted": 3,
+        "screen_untrusted": false,
+        "since_last_accept": 2,
+        "status": "running",
+        "wall_s": 14.4,
+        "wall_s_per_accept": 4.8
+      },
+      "walls": {
+        "anomaly_breaker": false,
+        "confirm": false,
+        "frozen_guard": false,
+        "holdout": false,
+        "judge": false,
+        "noise_floor": false,
+        "paired": false,
+        "prereg": false,
+        "validity": false
+      },
+      "wins_accepted": 0,
+      "wins_planted": 2
+    }
+  ],
+  "engine_version": "1.1.0",
+  "env": "darwin-23.6.0-arm64-8cores-py3.14",
+  "generated_at": "2026-09-03T07:33:18Z",
+  "seed": "1,2,3",
+  "sequences": {
+    "1": [
+      "G6-timer",
+      "G2-edit-tests",
+      "W1-dedupe-set",
+      "G5-env-sniff",
+      "N4-typehint",
+      "N3-rename",
+      "N1-comment",
+      "N6-blank",
+      "N5-all",
+      "G3-fast-wrong",
+      "N2-docstring",
+      "W2-wordfreq-dict",
+      "G4-size-special",
+      "G1-edit-bench",
+      "W3-pairs-counting"
+    ],
+    "2": [
+      "G1-edit-bench",
+      "N1-comment",
+      "N4-typehint",
+      "G4-size-special",
+      "G2-edit-tests",
+      "N5-all",
+      "N6-blank",
+      "N2-docstring",
+      "W3-pairs-counting",
+      "N3-rename",
+      "G3-fast-wrong",
+      "W2-wordfreq-dict",
+      "W1-dedupe-set",
+      "G6-timer",
+      "G5-env-sniff"
+    ],
+    "3": [
+      "G4-size-special",
+      "G2-edit-tests",
+      "N4-typehint",
+      "G3-fast-wrong",
+      "G6-timer",
+      "W1-dedupe-set",
+      "N2-docstring",
+      "W2-wordfreq-dict",
+      "N5-all",
+      "G5-env-sniff",
+      "N3-rename",
+      "W3-pairs-counting",
+      "N6-blank",
+      "G1-edit-bench",
+      "N1-comment"
+    ]
+  }
+}
