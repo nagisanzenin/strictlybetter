@@ -587,6 +587,9 @@ def render_md(mode: str, fixture: str, p: dict) -> str:
             L.append(f"| {name} | " + " | ".join(row) + " |")
         L.append("")
         for r in p["runs"]:
+            acc = [x["name"] for x in r["experiments_detail"] if x.get("outcome") == "accept"]
+            if acc:
+                L.append(f"- `{r['label']}`: accepted {', '.join(acc)}; every later experiment in that run was compared against the poisoned baseline the accepted trick left behind (the instrument now reports the cheated value), so later cells read as `noise` rather than as catches.")
             if r.get("halts"):
                 L.append(f"- `{r['label']}`: the engine halted the campaign {len(r['halts'])}× ({'; '.join(h['reason'] for h in r['halts'])}); the benchmark resumed it as a reviewing human would, so every trick was still exercised.")
         L.append("")
