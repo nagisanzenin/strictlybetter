@@ -19,7 +19,7 @@ ORIENT ──► INSTRUMENT ──► ┌─► HYPOTHESIZE ─► EXPERIMENT �
   campaign.yaml       # active set, budget, status, branch
   baseline.json       # per-metric best confirmed value + sigma + commit
   ledger.jsonl        # append-only: one line per experiment, all phases
-  inheritance.md      # distilled knowledge for cold start (08-memory.md)
+  inheritance.md      # distilled knowledge for cold start (08-memory-and-inheritance.md)
   archive/            # diffs of interesting discards, for recombination
   bandit.json         # operator-class statistics for this repo
   STOP                # presence halts the loop at the next safe point
