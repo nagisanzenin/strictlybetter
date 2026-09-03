@@ -145,7 +145,7 @@ Work through this list for each id; stop at the first branch that ends it.
 6. **Confirm** → `$SB confirm <id>`. Read `"verdict"` from its first line.
 7. **Cost** (before the final verb, so the bandit sees it) → `$SB cost <id> --wall-s <experimenter seconds> --tier <low|medium|high>`. Tokens are unknown on this platform; the dollars column is an estimate from zero tokens, and the cycle summary says "estimated".
 8. **Final verb** → confirm `accept` → `$SB accept <id>` (fast-forwards the campaign branch, ratchets the baseline). If `accept` reports "not a fast-forward", treat as STALE in step 3. Confirm `discard` → `$SB discard <id> --reason <reason> --archive` with `<reason>` the confirm line's `"reason"` when its prefix is in the fixed vocabulary, else `noise`.
-   In a frontier campaign `accept` adds a member instead of fast-forwarding; its output has `member`, `parent_member`, `retired`, `preferred_member`. Quote them in (g). A confirm reason `dominated:<member>` is not in the discard vocabulary: discard with `--reason noise --archive` (the ledger's `confirm` event keeps the dominated reason).
+   In a frontier campaign `accept` adds a member instead of fast-forwarding; its output has `member`, `parent_member`, `retired`, `preferred_member`. Quote them in (g). A confirm reason `dominated:<member>` is not in the discard vocabulary: discard with `--reason dominated --archive` (the ledger's `confirm` event keeps the dominated reason).
 
 Judge payload (step 5): the engine composes it, so no transcript text can leak into it:
 

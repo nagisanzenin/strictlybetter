@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # ----------------------------------------------------------------------------
 # Constants (fixed before data; see docs/04 and docs/06). Do not tune to results.
@@ -106,7 +106,7 @@ DEFAULT_PROTECTED = [".github/", ".gitlab-ci.yml", ".env", ".env.*", "*.pem", "*
 WALL_KEYS = ["validity", "noise_floor", "confirm", "holdout", "frozen_guard", "judge",
              "prereg", "anomaly_breaker", "paired"]
 DISCARD_REASONS = ["noise", "regression", "integrity", "gamed", "build-failed", "timeout",
-                   "budget", "invalid", "harness-error", "manual"]
+                   "budget", "invalid", "harness-error", "manual", "dominated"]
 
 
 class SBError(Exception):
@@ -1654,10 +1654,12 @@ def campaign_start(home: Home, args) -> int:
             if card["direction"] == "equal":
                 continue
             st = (card.get("fidelity") or {}).get("confirm", {}).get("stages")
+            n_goal_tests = max(1, len([g for g in goals if home.load_card(g)["direction"] != "equal"]))
+            split = 1.0 if spec.get("composition") == "oec" else 1.0 / n_goal_tests
             if isinstance(st, list) and len(st) == 2:
-                r_total, a_look = int(st[0]) + int(st[1]), c3["alpha_test"] * POCOCK_TWO_LOOK
+                r_total, a_look = int(st[0]) + int(st[1]), c3["alpha_test"] * TWO_LOOK_SPLIT * split
             else:
-                r_total, a_look = fidelity_spec(card, "confirm")["repeats"], c3["alpha_test"]
+                r_total, a_look = fidelity_spec(card, "confirm")["repeats"], c3["alpha_test"] * split
             need = math.ceil(-math.log2(a_look))
             if 2.0 ** (-r_total) > a_look and not args.allow_underpowered:
                 halt(home, home.campaign(), f"underpowered:{m}:pairs={r_total}:alpha={a_look:.4g}")
@@ -2113,7 +2115,8 @@ def cmd_confirm(home: Home, args) -> int:
         conf_eff = primary_goal_effect(c, comps)
         out = {"verdict": "accept" if d["verdict"] == "promote" else "discard", "reason": d["reason"], "level": "confirm", "commit": r["commit"],
                "rounds": rounds, "anomaly_extra_repeats": anomaly, "screen_effect": screen_eff, "confirm_effect": conf_eff, "paired": paired,
-               "tests": stat_tests, "alpha_campaign": d.get("alpha_campaign"), "alpha_test": d.get("alpha_test"), "alpha_look": d.get("alpha_look"), "looks": looks,
+               "tests": stat_tests, "alpha_campaign": d.get("alpha_campaign"), "alpha_test": d.get("alpha_test"), "alpha_look": d.get("alpha_look"),
+               "alpha_goal": d.get("alpha_goal"), "n_goal_tests": d.get("n_goal_tests"), "looks": looks,
                "comparisons": comps, "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in results.items()},
                "head_results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in head_results.items()}, "kappa_eff": ke}
     finally:
@@ -2314,7 +2317,9 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
     regression at ALPHA_GUARDRAIL, or a median regression beyond the tolerance, blocks. Equal
     guardrails: exact match. A two-stage design spends alpha with Pocock's constant per look."""
     a_test = alpha_per_test(c)
-    a_look = a_test * (POCOCK_TWO_LOOK if looks > 1 else 1.0)
+    a_look = a_test * (TWO_LOOK_SPLIT if looks > 1 else 1.0)
+    n_goal_tests = max(1, len([g for g in c["goals"] if cards[g]["direction"] != "equal"]))
+    a_goal = a_look / n_goal_tests if c.get("composition") != "oec" else a_look   # Bonferroni across goals within one confirmation
     tests = {}
     regressed, improved, invalid, inconclusive = [], [], [], []
     for comp in comps:
@@ -2343,9 +2348,9 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
             floor_rel = float(num((card.get("acceptance") or {}).get("min_effect_rel", 0.0), 0.0))
             head_med = float(comp.get("baseline") or 0.0)
             floor_abs = floor_rel * abs(head_med)
-            ok_p = t["p"] is not None and t["p"] <= a_look
+            ok_p = t["p"] is not None and t["p"] <= a_goal
             ok_floor = med >= floor_abs
-            tests[mid] = {"kind": "paired-sign-flip", "alternative": "improvement", "p": t["p"], "alpha": a_look, "n_pairs": t["n"], "exact": t["exact"],
+            tests[mid] = {"kind": "paired-sign-flip", "alternative": "improvement", "p": t["p"], "alpha": a_goal, "n_pairs": t["n"], "exact": t["exact"],
                           "mean_diff": t["stat"], "median_diff": med, "min_effect_abs": floor_abs, "significant": ok_p, "practical": ok_floor}
             if ok_p and ok_floor:
                 improved.append(mid)
@@ -2382,8 +2387,8 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
             tests["__oec__"] = {"kind": "paired-sign-flip", "alternative": "weighted-composite-improvement", "p": t["p"], "alpha": a_look, "n_pairs": t["n"], "exact": t["exact"], "mean_diff": t["stat"]}
             improved = list(per_goal.keys()) if (t["p"] is not None and t["p"] <= a_look and (t["stat"] or 0) > 0) else []
             inconclusive = [] if improved else ([list(per_goal.keys())[0]] if (t["stat"] or 0) > 0 and (t["p"] or 1) < 0.5 else [])
-    out = {"level": "confirm", "alpha_campaign": float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN)), "alpha_test": a_test, "alpha_look": a_look,
-           "look": look, "looks": looks, "multiplicity": c.get("multiplicity", "bonferroni"), "tests": tests, "improved": improved, "regressed": regressed, "invalid": invalid}
+    out = {"level": "confirm", "alpha_campaign": float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN)), "alpha_test": a_test, "alpha_look": a_look, "alpha_goal": a_goal,
+           "n_goal_tests": n_goal_tests, "look": look, "looks": looks, "multiplicity": c.get("multiplicity", "bonferroni"), "tests": tests, "improved": improved, "regressed": regressed, "invalid": invalid}
     if c.get("composition") == "frontier":
         # goals may trade: a goal regression is allowed when the candidate improves another goal
         # (exact test vs its parent) and no archive member dominates it (heuristic margins).
@@ -2492,17 +2497,21 @@ def frontier_preferred(cards: dict, c: dict) -> dict | None:
     active = frontier_active(c)
     if not active:
         return None
-    base = next((m for m in (c.get("frontier") or []) if m.get("id") == "f0"), active[0])
     goals = c["goals"]
     weights = ((c.get("preference") or {}).get("weights") or {}) if isinstance(c.get("preference"), dict) else {}
-    def norm(m, g):
-        bv, mv = goal_value_dir(cards[g], base["values"].get(g)), goal_value_dir(cards[g], m["values"].get(g))
-        if bv is None or mv is None:
+    lo, hi = {}, {}
+    for g in goals:
+        vs = [v for v in (goal_value_dir(cards[g], m["values"].get(g)) for m in active) if v is not None]
+        lo[g], hi[g] = (min(vs), max(vs)) if vs else (0.0, 0.0)
+    def pos(m, g):   # 0 = worst active member on this goal, 1 = best
+        v = goal_value_dir(cards[g], m["values"].get(g))
+        if v is None:
             return 0.0
-        return (mv - bv) / (abs(bv) or 1.0)
+        span = hi[g] - lo[g]
+        return (v - lo[g]) / span if span > 0 else 1.0
     if weights:
-        return max(active, key=lambda m: sum(float(weights.get(g, 1.0)) * norm(m, g) for g in goals))
-    return max(active, key=lambda m: min(norm(m, g) for g in goals))
+        return max(active, key=lambda m: sum(float(weights.get(g, 1.0)) * pos(m, g) for g in goals))
+    return max(active, key=lambda m: (min(pos(m, g) for g in goals), sum(pos(m, g) for g in goals)))   # the knee: most balanced, then best overall
 
 
 def accept_frontier(home: Home, c: dict, r: dict, conf: dict, exp_commit: str, parent: str, eid: str, forced: bool) -> int:
@@ -3417,6 +3426,7 @@ def selftest() -> int:
         check("confirm accepts real improvement", r["confirm"]["verdict"] == "accept")
         tt = (r["confirm"].get("tests") or {}).get("score") or {}
         check("confirm carries the exact test", tt.get("kind") == "paired-sign-flip" and tt.get("p") is not None and tt["p"] <= tt["alpha"] and tt.get("n_pairs") == 10)
+        check("single goal: per-goal alpha equals the look alpha", abs(tt["alpha"] - r["confirm"]["alpha_look"]) < 1e-15 and r["confirm"].get("n_goal_tests") == 1)
         check("guardrail-only full level does not block", r["confirm"].get("level") == "confirm")
         check("confirm is paired against fresh head", r["confirm"].get("paired") is True and (r["confirm"].get("head_results") or {}).get("score", {}).get("median") in (40.0, 41.0))
         check("confirm used the holdout seeds", sorted(set((r["confirm"].get("results") or {}).get("seed", {}).get("values") or [])) == [7.0, 8.0, 9.0])
@@ -3757,6 +3767,7 @@ def selftest() -> int:
             cmd_frontier(home, argparse.Namespace(json=True))
         fr = json.loads(out.getvalue())
         check("frontier command lists members and a preferred point", len(fr["members"]) >= 3 and fr["preferred"] is not None)
+        check("knee prefers the balanced member, not the base", fr["preferred"] != "f0")
         check("campaign branch points at the preferred member", git(["rev-parse", c["branch"]], repo) == next(m for m in c["frontier"] if m["id"] == fr["preferred"])["commit"])
         check("frontier campaign writes no global ratchet", home.ratchet() == {})
         with contextlib.redirect_stdout(io.StringIO()):
