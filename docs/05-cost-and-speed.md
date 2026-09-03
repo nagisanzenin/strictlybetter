@@ -80,6 +80,9 @@ The experimenter is told the batch size and the operator mix. It does not decide
 - yield curve: accepted improvements vs experiments, which shows saturation before the plateau detector fires
 - false-promotion rate: promoted at screen but discarded at full/confirm, which is the screen fidelity's quality
 - judge overhead: fraction of spend on judgment
+- holdout gap trend: screen improvement minus confirm improvement over accepted changes (`04-anti-overfitting.md` §4.4)
+
+**False-promotion budget.** A campaign setting (default: 40% of promotions over any window of 10). Exceeding it means the screen fidelity is lying on this machine; the harness re-measures screen sigma, raises screen repeats, or demotes screen to full for the rest of the campaign, and the report says which. This is what keeps multi-fidelity cheap without letting it become a source of noise-selected winners.
 
 These numbers are in the campaign report and the inheritance body. A campaign whose cost per accepted improvement rises steeply is saturating; the distiller says so and the loop escalates or stops rather than grinding.
 

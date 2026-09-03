@@ -13,7 +13,9 @@ Overfitting in a code research loop means optimizing the instrument instead of t
 
 An LLM experimenter is not malicious, but it is an optimizer under pressure, and documented cases (see `citations.md` §7) show coding agents editing tests, special-casing evaluators, and rewriting harnesses when that is the shortest path to a passing number. The design assumes this will happen and makes it non-fatal.
 
-## 4.2 Wall 1: the noise floor and the confirmation run
+## 4.2 Wall 1: validity, the noise floor, and the confirmation run
+
+**Validity first.** A number is compared only if the run that produced it was a run: exit code zero, metric parsed, duration within the card's expected band, output not a placeholder or a suspicious constant, manifest recorded. This is cheap and it catches the crudest class outright: an agent that replaced a neural net with a search engine reported `train_time_sec: 0.0` and a 99% win rate (`01-prior-art.md`, casebook). Curie's setup validator (placeholders, hard-coded values) is the same instinct.
 
 **Noise floor.** At the current best commit, the harness measures each metric `k` times (default 5; raised until the standard error of sigma is below 20% of sigma, capped by cost). Sigma is stored on the card with the commit and an environment fingerprint. It is re-measured whenever the environment fingerprint changes, at every re-baseline, and whenever a plateau makes the distiller suspect the instrument.
 
@@ -21,13 +23,15 @@ An LLM experimenter is not malicious, but it is an optimizer under pressure, and
 
 **Confirmation.** The screening number that promoted a candidate is discarded for the purpose of acceptance. The harness re-measures at `full` and `confirm` fidelity from a clean checkout, with holdout inputs, `r` repeats (default 3). Acceptance uses the confirmation median. This is the winner's-curse correction: the number that selected the winner is biased upward by selection, the fresh number is not.
 
-**Why this is the Ladder.** Blum and Hardt (2015) showed that a leaderboard which only publishes a new score when it beats the previous best by more than a step size resists adaptive overfitting: the number of "false improvements" an adaptive submitter can extract is bounded, and the bound depends on the step size, not on the number of submissions. Our step size is `κσ`. The ratchet in `baseline.json` is a Ladder over the project's metrics.
+**Three outcomes, and a cap.** Confirmation returns `accept`, `discard`, or `inconclusive`. Inconclusive adds repeats up to the card's cap and then discards as noise. The cap matters: unbounded re-measurement of a favorite candidate is exactly the adaptive querying the Ladder guards against. The campaign carries a false-promotion budget (§5.8) that counts every promote-then-discard and every inconclusive; exceeding it means screen fidelity is not trustworthy on this machine, and the loop re-measures screen sigma or raises screen repeats before continuing.
+
+**Why this is the Ladder.** Blum and Hardt (2015) showed that a leaderboard which only publishes a new score when it beats the previous best by more than a step size η (and rounds released scores to a multiple of η) keeps the reported running best accurate under adaptively chosen submissions, with error growing as the cube root of log(submissions) rather than as the square root of submissions for a naive leaderboard. Our step size is `κσ`. The ratchet in `baseline.json` is a Ladder over the project's metrics. The guarantee is on the running best, not on each rejected candidate's value: the ratchet knows it improved, not by how much any discard fell short, and the docs never claim otherwise.
 
 ## 4.3 Wall 2: the frozen instrument
 
-The experimenter cannot change what is measured or how:
+The experimenter cannot change what is measured or how, and the boundary is enforced by the harness and the platform's tool hooks, not by prompt text. In a March 2026 comparison of autoresearch skills, file protection was prompt-only in every mainstream one; an agent asked to speed up a Python sort compiled a C radix sort and loaded it through `ctypes` (`01-prior-art.md`, casebook). BAITBENCH measured validity prompting reducing shortcut-taking by six points. Prompts are advice; hooks are walls.
 
-- **Frozen paths** listed on each card (tests, benches, fixtures, eval scripts, reference outputs) are hashed at campaign start. Any diff touching them is rejected before measurement, and the campaign halts.
+- **Frozen paths** listed on each card (tests, benches, fixtures, eval scripts, reference outputs) are hashed at campaign start. During a campaign a pre-edit hook denies any write to them at the tool boundary; at gate time the diff is checked again for platforms without such hooks. Any diff touching them is rejected before measurement, and the campaign halts.
 - **Measurement runs outside the experimenter's process** from a clean checkout of the experiment commit in a separate worktree, with the card's pinned environment. The experimenter's shell state, caches, and uncommitted files are not part of the measurement.
 - **Timers, counters, and parsers** belong to the harness, not to the code under test. If a metric's command lives inside the repo (a `make bench`), the script is a frozen path.
 - **Metric definitions** (`.strictlybetter/metrics/`) are outside the experimenter's write set.
@@ -46,6 +50,7 @@ Two disciplines keep the holdout useful over many experiments:
 
 1. **Limited leakage.** Confirmation reports `accepted` or `discarded` and the confirmation numbers of *accepted* candidates only. Discarded candidates' holdout numbers are written to the ledger under a field the experimenter is instructed not to read and the harness does not surface in status. This is the reusable-holdout idea (Dwork et al. 2015) in its crude, practical form: the experimenter learns about the holdout only through the ratchet, which moves rarely.
 2. **Rotation.** After `n` acceptances (default 10), the harness regenerates holdout seeds or rotates the slice, and re-baselines. A loop that ran for weeks against one holdout has, in effect, seen it.
+3. **The gap is a signal.** The harness tracks, per accepted change and as a campaign trend, the difference between the screen (visible) improvement and the confirm (holdout) improvement. A growing gap is the signature of overfitting; SpecBench measured it growing with code size, and the tennis post-mortem saw it open exactly when gaming began. A gap trend beyond a threshold halts the campaign for review rather than continuing.
 
 ## 4.5 Wall 4: pre-registration
 
@@ -75,6 +80,12 @@ The checklist grows from experience (`08-memory-and-inheritance.md` §8.3). Seed
 - environment tampering (thread count, GC flags, `PYTHONHASHSEED`) outside the declared operator
 - timer, counter, or parser touched
 - nondeterminism introduced that widens variance in the favorable direction
+- the learning or computing component replaced by something that does not learn or compute (a search engine in place of the net; a lookup in place of the algorithm)
+- implausibly short work (zero-second training, a benchmark that finishes before warm-up)
+- a native or foreign-language extension loaded (`ctypes`, a compiled module, a subprocess to another toolchain) outside the declared operator
+- logs or receipts written by the diff itself rather than by the harness
+
+**Curve-shape anomaly breaker.** Honest optimization decelerates; gaming accelerates after a plateau. A promoted candidate whose screen effect exceeds three times the rolling mean of the campaign's confirmed effects, arriving after a plateau, is held for the judge's recommended check regardless of the verdict. This is the rule the tennis post-mortem derived after watching +14 bps per honest iteration become +212 bps in one gamed step.
 
 `suspicious` triggers the recommended check (usually a fresh fixture or a different seed set) rather than an automatic discard. `gamed` discards and counts toward the halt condition in `09-governance.md`.
 

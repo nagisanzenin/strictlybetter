@@ -18,6 +18,8 @@ Between the gates the loop asks nothing. If it needs a human, it halts and says 
 - **The network**, beyond package registries needed to build. No deployments, no external services, no telemetry.
 - **Its own rules**: `.strictlybetter/metrics/*.yaml`, `campaign.yaml`, `baseline.json`, and the harness itself are outside the experimenter's write set. The harness checks the diff.
 
+Enforcement is layered: on Claude Code a pre-edit hook denies writes to frozen and protected paths, and to anything outside the active worktree, while a campaign is running; on every platform the harness re-checks the diff at gate time and the eval hash before every measurement. The prompt tells the agent the rules; the hook and the hash make them true.
+
 ## 9.3 Budgets and the kill switch
 
 - Hard caps on dollars, wall-clock hours, and experiment count. Counters are updated before an experiment starts. Exceeding any cap stops the loop at the next safe point.

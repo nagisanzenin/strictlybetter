@@ -47,7 +47,7 @@ Agent: `metrologist`. Turns the profile into candidate metric cards (`02-metrics
 
 1. Runs each candidate `k` times at the current commit (`k = 5` default, more for noisy metrics) to measure sigma and cost.
 2. Quarantines metrics whose repeats disagree beyond a sanity bound (flaky tests, timing on a loaded machine).
-3. Runs the probe experiments the metrologist proposed and records sensitivity.
+3. Runs the probe experiments the metrologist proposed and records sensitivity, and runs each card's monotonicity selftest: a known degradation must make the metric worse (`02-metrics.md` §2.6).
 4. Hashes the frozen paths and stores the eval hash.
 5. Writes `baseline.json`.
 
@@ -80,13 +80,15 @@ The experimenter sees its screening numbers. It does not see holdout values, con
 
 ### JUDGE
 
-Two parts, both harness-driven.
+Three parts, all harness-driven.
+
+**Validity**: before any number is compared, the run must be a run. Exit code, metric parsed, duration inside the card's expected band, output not a placeholder, manifest recorded (commit, config hash, seeds, environment fingerprint). An invalid run is `discard: invalid`, never a candidate. The Gomoku case in `01-prior-art.md` (a "trained" agent reporting zero seconds of training) is the reason this check exists.
 
 **Statistical**: compare screening numbers to baseline with the acceptance rule. Outcomes: `discard` (no goal moved beyond κσ, or a guardrail broke), `promote` (moved beyond κσ at screen), or `retry-screen` (within noise but predicted large; one more screening repeat is cheaper than a lost hypothesis).
 
 **Judgment**: for promoted candidates only, the `judge` agent is invoked blind: it receives the diff, the metric cards' `gaming_risks`, the pre-registration, and the numbers. It does not receive the experimenter's reasoning or conversation. It answers with a fixed JSON verdict: `clean`, `suspicious` (with the pattern named), or `gamed`. `suspicious` triggers a targeted extra check (for example, re-run with a fresh fixture) rather than an automatic discard.
 
-Then the harness runs `full` and `confirm` fidelity from a clean checkout of the worktree's commit, with holdout inputs. Acceptance is decided on confirmation numbers only.
+Then the harness runs `full` and `confirm` fidelity from a clean checkout of the worktree's commit, with holdout inputs. Acceptance is decided on confirmation numbers only. Confirmation has three outcomes: `accept`, `discard`, and `inconclusive`. Inconclusive (the confirmation median is inside κσ while the screen was outside it) adds repeats up to the card's cap; still inconclusive is `discard: noise`. The cap exists because "keep measuring until it wins" is the adaptive querying the Ladder guards against; the campaign's false-promotion budget (`05-cost-and-speed.md` §5.8) counts every inconclusive.
 
 ### COMMIT or DISCARD
 

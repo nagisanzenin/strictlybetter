@@ -10,7 +10,9 @@ The loop's memory has two layers with different readers. The **ledger** is for m
 id, campaign, ts_start, ts_end,
 operator, target, hypothesis, predicted, prereg_hash,
 branch, diff_hash, diff_lines, new_deps,
+manifest: {commit, config_hash, seeds, env_fingerprint, fidelity},
 screen: {metric: value}, full: {…}, confirm: {metric: [repeats]},
+holdout_unsurfaced: {…},          # discarded candidates' holdout numbers; not shown in status
 judge: {verdict, pattern, notes},
 verdict: accepted | discarded, reason,
 cost: {tokens_in, tokens_out, dollars, wall_s, model_tier},

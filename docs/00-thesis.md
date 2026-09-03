@@ -8,6 +8,8 @@ The name is the acceptance rule. In Magic: The Gathering a card is *strictly bet
 
 Karpathy's `autoresearch` (March 2026) showed the shape of the thing: fix a training script, give an agent a five minute budget per run and one number to move, keep what improves the number, discard what does not, repeat overnight. It works because three things were done by hand before the loop started: someone chose the artifact to mutate, someone wrote the measurement, and someone decided what "better" means.
 
+Six months later the pattern has about eighty derivatives (`01-prior-art.md`). The good ones added a noise floor, a worktree per attempt, and a `METRIC name=value` protocol. None of them does all of: discover the metrics from the repo, hold a guard set that must not regress, confirm on a holdout the experimenter never sees, enforce the evaluator boundary in the harness rather than in the prompt, and leave memory a cold-start agent can inherit.
+
 Those three hand-made pieces are exactly what stops the pattern from being universal. A different repo needs a different measurement. A science project has a different notion of "better" than a CLI tool. A brownfield service has a dozen things that must not regress while one thing improves. A greenfield project has nothing to measure at all yet.
 
 The thesis of this project is that the three pieces can be derived rather than hand-written, and that the loop around them can be made honest enough to run unattended:

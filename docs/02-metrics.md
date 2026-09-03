@@ -15,10 +15,15 @@ unit: MiB/s
 
 measure:
   command: "cargo bench --bench parse -- --output-format bencher parse_large"
-  parse: 'regex:parse_large.*?(\d+(?:\.\d+)?) MiB/s'
+  parse: 'regex:parse_large.*?(\d+(?:\.\d+)?) MiB/s'   # also json:<path> or metric-line:<name>
   cwd: .
   timeout_s: 600
   env: { CARGO_INCREMENTAL: "0" }
+  expected_duration_s: [60, 200]   # validity band; a 0-second "win" is invalid, not a win
+
+degradation:                     # recipe for the monotonicity selftest (§2.6)
+  patch: "insert std::thread::sleep(1ms) in parse_large's inner loop"
+  expected: worse
 
 fidelity:                       # cheapest first; screen is what experiments see
   - name: screen
@@ -60,6 +65,8 @@ Field notes:
 - **noise.sigma** is measured, not declared. A card without a measured sigma cannot be used as a goal. The harness refuses.
 - **integrity** freezes the instrument. If any experiment's diff touches a frozen path, or the hash of frozen paths changes, the experiment is rejected before measurement and the campaign halts for human review. Instrument changes are legitimate only in an instrument campaign (see `07-universality.md`).
 - **gaming_risks** are written by the metrologist agent at card creation and handed to the blind judge. They are the checklist the judge reads the diff against.
+- **parse: metric-line** accepts the `METRIC name=value` stdout convention used by the autoresearch ecosystem (pi-autoresearch, codex-autoresearch), so an existing bench script can be a card without modification.
+- **degradation** is a recipe for a known-bad change. The harness applies it in a throwaway worktree and requires the metric to get worse. A metric that cannot detect a deliberate regression is not an instrument (engram's release protocol calls this the monotonicity test; the discriminability check in `skillforge-autoresearch` is the same idea).
 
 ## 2.2 Metric properties the loop cares about
 
@@ -132,6 +139,7 @@ The metrologist agent produces candidate cards from, in order of trust:
 2. **Archetype defaults**: the per-archetype card templates in `07-universality.md` (for a Rust crate: tests, clippy, build time, binary size, criterion benches, unsafe count).
 3. **Stated goals**: README claims ("fast", "zero-copy", "97.2% on the benchmark"), open issues labelled performance/bug, a paper's headline table.
 4. **Probes**: cheap experiments that change something plausible and see which candidate metrics respond. A metric with no sensitivity is demoted to diagnostic.
+5. **Monotonicity selftest**: the card's `degradation` recipe is applied in a throwaway worktree; the metric must move in the wrong direction by more than its sigma. A card that fails cannot be a goal or a guardrail.
 
 The output of discovery is a proposal, not a decision. The user picks the campaign's goals and guardrails at the first human gate (`09-governance.md`). Cards for metrics not chosen are kept as diagnostics so the ledger still records them.
 
