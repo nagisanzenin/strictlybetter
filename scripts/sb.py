@@ -72,6 +72,7 @@ POCOCK_TWO_LOOK = TWO_LOOK_SPLIT  # kept as an alias for older references
 PERM_EXACT_MAX_PAIRS = 20    # exact sign-flip enumeration up to 2^20; Monte Carlo above
 PERM_MC_SAMPLES = 20000
 PERM_MC_SEED = 20260903
+FRONTIER_MAX = 8             # frontier campaigns keep at most this many non-dominated members (crowding-distance pruning)
 ANOMALY_MULT = 3.0          # effect > 3x rolling mean of confirmed effects, after plateau
 FP_WINDOW = 10              # false-promotion window (promotions)
 FP_MAX_FRACTION = 0.4
@@ -504,7 +505,7 @@ class Home:
             if ev == "prereg":
                 r.update({k: d.get(k) for k in ["campaign", "operator", "target", "hypothesis",
                                                  "predicted", "expected_diff_size", "mechanism",
-                                                 "prereg_hash", "worktree", "base_commit", "ts_start"]})
+                                                 "prereg_hash", "worktree", "base_commit", "parent_member", "ts_start"]})
                 r["ts_start"] = e.get("ts")
             elif ev == "submit":
                 for k in ("measures", "judge_stat", "judge", "confirm"):
@@ -1111,7 +1112,7 @@ def decide(card_map: dict, campaign: dict, comparisons: list, level: str) -> dic
     if invalid and walls.get("validity", True):
         out["verdict"], out["reason"] = "discard", "invalid"
         return out
-    regressed = [c["id"] for c in guards if c["regressed"]] + [c["id"] for c in goals if c["regressed"]]
+    regressed = [c["id"] for c in guards if c["regressed"]] + ([] if campaign.get("composition") == "frontier" else [c["id"] for c in goals if c["regressed"]])
     out["regressed"] = regressed
     if regressed:
         out["verdict"], out["reason"] = "discard", f"regression:{regressed[0]}"
@@ -1635,6 +1636,13 @@ def campaign_start(home: Home, args) -> int:
     c3 = home.campaign()
     c3["card_hashes"] = {m: card_fingerprint(home.load_card(m)) for m in goals + guardrails + diagnostics}
     c3["start_values"] = {m: (b.get(m) or {}).get("best") for m in goals + guardrails + diagnostics}
+    if spec.get("composition") == "frontier":
+        if len(goals) < 2:
+            raise SBError("composition 'frontier' needs at least two goals")
+        c3["frontier"] = [{"id": "f0", "commit": commit, "parent": None, "experiment": None, "attempts": 0,
+                           "values": {g: (b.get(g) or {}).get("best") for g in goals}, "branch": branch}]
+        c3["frontier_max"] = int(num(spec.get("frontier_max", FRONTIER_MAX), FRONTIER_MAX))
+        c3["preference"] = spec.get("preference") if isinstance(spec.get("preference"), dict) else None
     c3["alpha"] = float(num(spec.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN))
     c3["multiplicity"] = spec.get("multiplicity", "bonferroni")
     c3["alpha_test"] = alpha_per_test(c3)
@@ -1696,14 +1704,25 @@ def cmd_prereg(home: Home, args) -> int:
     add_spend(c, experiments=1)  # budget updated before work starts
     home.save_campaign(c)
     commit = c["head_commit"]
+    parent_member = None
+    if c.get("composition") == "frontier":
+        cards = card_set(home, c)
+        want = getattr(args, "parent", None) or (h.get("parent") if isinstance(h, dict) else None)
+        member = next((m for m in frontier_active(c) if m["id"] == want), None) if want else frontier_pick_parent(cards, c)
+        if member is None:
+            raise SBError("frontier has no active member" + (f" named {want}" if want else ""))
+        member["attempts"] = int(member.get("attempts", 0)) + 1
+        commit = member["commit"]
+        parent_member = member["id"]
+        home.save_campaign(c)
     path = worktree_new(home, eid, commit)
     prereg_hash = sha256_text(json.dumps(h, sort_keys=True))[:16]
     data = {"campaign": c["id"], "operator": h["operator"], "target": h["target"], "hypothesis": h["hypothesis"],
             "predicted": h["predicted"], "expected_diff_size": h.get("expected_diff_size", "small"),
             "mechanism": h.get("mechanism", ""), "prereg_hash": prereg_hash, "worktree": path, "base_commit": commit,
-            "exploration_level": c.get("exploration_level", 0)}
+            "exploration_level": c.get("exploration_level", 0), "parent_member": parent_member}
     home.ledger_add(eid, "prereg", data)
-    print(json.dumps({"id": eid, "worktree": path, "base_commit": commit, "prereg_hash": prereg_hash}))
+    print(json.dumps({"id": eid, "worktree": path, "base_commit": commit, "prereg_hash": prereg_hash, "parent_member": parent_member}))
     return 0
 
 
@@ -2004,7 +2023,7 @@ def cmd_confirm(home: Home, args) -> int:
     cards = card_set(home, c)
     checkout = worktree_new(home, f"{eid}-confirm", r["commit"])
     paired = bool(walls.get("paired", True))
-    head_checkout = worktree_new(home, f"{eid}-head", c["head_commit"]) if paired else None
+    head_checkout = worktree_new(home, f"{eid}-head", r.get("base_commit") or c["head_commit"]) if paired else None
     head_full, head_results = {}, {}
     t0 = time.perf_counter()
     try:
@@ -2148,6 +2167,8 @@ def cmd_accept(home: Home, args) -> int:
     exp_commit = r["commit"]
     verify_card_hashes(home, c)
     parent = git(["rev-parse", f"{exp_commit}^"], home.repo)
+    if c.get("composition") == "frontier":
+        return accept_frontier(home, c, r, conf, exp_commit, parent, eid, bool(args.force))
     if parent != c["head_commit"]:
         raise SBError(f"{eid} is not a fast-forward of the campaign head ({parent[:8]} != {c['head_commit'][:8]}); discard and re-run on the new head")
     tree = git(["rev-parse", f"{exp_commit}^{{tree}}"], home.repo)
@@ -2336,6 +2357,7 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
             if (t2["p"] is not None and t2["p"] <= ALPHA_GUARDRAIL and med < 0) or (-med > tol and tol > 0) or (tol == 0 and med < 0 and t2["p"] is not None and t2["p"] <= ALPHA_GUARDRAIL):
                 regressed.append(mid)
                 tests[mid]["regression_p"] = t2["p"]
+                tests[mid]["goal_regressed"] = True
         else:
             t2 = paired_randomization_test(d, "less")   # alternative: regression (improvement negative)
             tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA)) * float(comp.get("sigma") or 0.0)
@@ -2362,6 +2384,32 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
             inconclusive = [] if improved else ([list(per_goal.keys())[0]] if (t["stat"] or 0) > 0 and (t["p"] or 1) < 0.5 else [])
     out = {"level": "confirm", "alpha_campaign": float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN)), "alpha_test": a_test, "alpha_look": a_look,
            "look": look, "looks": looks, "multiplicity": c.get("multiplicity", "bonferroni"), "tests": tests, "improved": improved, "regressed": regressed, "invalid": invalid}
+    if c.get("composition") == "frontier":
+        # goals may trade: a goal regression is allowed when the candidate improves another goal
+        # (exact test vs its parent) and no archive member dominates it (heuristic margins).
+        goal_regressed = [m for m in regressed if m in c["goals"]]
+        guard_regressed = [m for m in regressed if m not in c["goals"]]
+        out["goal_regressed"], out["regressed"] = goal_regressed, guard_regressed
+        if invalid and c.get("walls", {}).get("validity", True):
+            out["verdict"], out["reason"] = "discard", "invalid"
+        elif guard_regressed:
+            out["verdict"], out["reason"] = "discard", f"regression:{guard_regressed[0]}"
+        elif improved:
+            cand_vals = {comp["id"]: comp.get("value") for comp in comps if comp["id"] in c["goals"]}
+            b = {}
+            for comp in comps:
+                if comp["id"] in c["goals"]:
+                    b[comp["id"]] = comp.get("sigma") or 0.0
+            dom = next((m for m in frontier_active(c) if dominates(cards, c["goals"], m["values"], cand_vals, b)), None)
+            if dom:
+                out["verdict"], out["reason"] = "discard", f"dominated:{dom['id']}"
+            else:
+                out["verdict"], out["reason"] = "promote", "frontier:improved:" + ",".join(improved) + (":traded:" + ",".join(goal_regressed) if goal_regressed else "")
+        elif inconclusive and look < looks:
+            out["verdict"], out["reason"] = "inconclusive", "stage-continue"
+        else:
+            out["verdict"], out["reason"] = "discard", "noise"
+        return out
     if invalid and c.get("walls", {}).get("validity", True):
         out["verdict"], out["reason"] = "discard", "invalid"
     elif regressed:
@@ -2373,6 +2421,151 @@ def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, co
     else:
         out["verdict"], out["reason"] = "discard", "noise"
     return out
+
+
+def goal_value_dir(card: dict, v) -> float | None:
+    """A goal value in 'higher is better' units."""
+    try:
+        return card_sign(card) * float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def dominates(cards: dict, goals: list, a_vals: dict, b_vals: dict, sig: dict) -> bool:
+    """Does A dominate B? A is not worse than B on any goal beyond tolerance (tau*sigma) and
+    better than B on at least one goal beyond kappa*sigma. Heuristic margins on stored confirm
+    medians; no error-rate claim (docs/13)."""
+    better_somewhere = False
+    for g in goals:
+        card = cards[g]
+        av, bv = goal_value_dir(card, a_vals.get(g)), goal_value_dir(card, b_vals.get(g))
+        if av is None or bv is None:
+            return False
+        s_g = float(sig.get(g) or 0.0)
+        tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA)) * s_g
+        kap = float((card.get("acceptance") or {}).get("kappa", KAPPA)) * s_g
+        if av < bv - tol:
+            return False
+        if av > bv + kap:
+            better_somewhere = True
+    return better_somewhere
+
+
+def crowding_distances(cards: dict, goals: list, members: list) -> dict:
+    """NSGA-II crowding distance on normalized goal values; extremes get infinity."""
+    dist = {m["id"]: 0.0 for m in members}
+    if len(members) <= 2:
+        return {m["id"]: math.inf for m in members}
+    for g in goals:
+        vals = [(goal_value_dir(cards[g], m["values"].get(g)), m["id"]) for m in members]
+        vals = [(v, i) for v, i in vals if v is not None]
+        if len(vals) < 2:
+            continue
+        vals.sort()
+        lo, hi = vals[0][0], vals[-1][0]
+        span = (hi - lo) or 1.0
+        dist[vals[0][1]] = math.inf
+        dist[vals[-1][1]] = math.inf
+        for k in range(1, len(vals) - 1):
+            if dist[vals[k][1]] != math.inf:
+                dist[vals[k][1]] += (vals[k + 1][0] - vals[k - 1][0]) / span
+    return dist
+
+
+def frontier_active(c: dict) -> list:
+    return [m for m in (c.get("frontier") or []) if not m.get("retired_by")]
+
+
+def frontier_pick_parent(cards: dict, c: dict) -> dict | None:
+    """The member with the fewest attempts; ties broken by the largest crowding distance
+    (extremes first, which pushes the frontier outward). Pre-declared, deterministic."""
+    active = frontier_active(c)
+    if not active:
+        return None
+    cd = crowding_distances(cards, c["goals"], active)
+    return sorted(active, key=lambda m: (int(m.get("attempts", 0)), -cd.get(m["id"], 0.0), m["id"]))[0]
+
+
+def frontier_preferred(cards: dict, c: dict) -> dict | None:
+    """The member `sb/<campaign>` points at: by declared preference weights on normalized goal
+    values, else the knee (max of the minimum normalized improvement over the base member)."""
+    active = frontier_active(c)
+    if not active:
+        return None
+    base = next((m for m in (c.get("frontier") or []) if m.get("id") == "f0"), active[0])
+    goals = c["goals"]
+    weights = ((c.get("preference") or {}).get("weights") or {}) if isinstance(c.get("preference"), dict) else {}
+    def norm(m, g):
+        bv, mv = goal_value_dir(cards[g], base["values"].get(g)), goal_value_dir(cards[g], m["values"].get(g))
+        if bv is None or mv is None:
+            return 0.0
+        return (mv - bv) / (abs(bv) or 1.0)
+    if weights:
+        return max(active, key=lambda m: sum(float(weights.get(g, 1.0)) * norm(m, g) for g in goals))
+    return max(active, key=lambda m: min(norm(m, g) for g in goals))
+
+
+def accept_frontier(home: Home, c: dict, r: dict, conf: dict, exp_commit: str, parent: str, eid: str, forced: bool) -> int:
+    """Frontier campaigns: the accepted commit becomes a new member on branch `sb/<campaign>-f<k>`
+    (a sibling of the campaign branch); members it dominates retire; the archive is pruned by
+    crowding distance; `sb/<campaign>` points at the preferred member. No global ratchet is written
+    (the frontier is the deliverable)."""
+    cards = card_set(home, c)
+    pm = next((m for m in (c.get("frontier") or []) if m["id"] == r.get("parent_member")), None)
+    if pm is None or pm["commit"] != parent:
+        raise SBError(f"{eid} does not descend from its recorded parent member; discard and re-run")
+    tree = git(["rev-parse", f"{exp_commit}^{{tree}}"], home.repo)
+    msg = git(["log", "-1", "--format=%B", exp_commit], home.repo) + provenance_block(r, conf, c)
+    env = dict(os.environ, GIT_AUTHOR_NAME="strictlybetter", GIT_AUTHOR_EMAIL="sb@strictlybetter.local",
+               GIT_COMMITTER_NAME="strictlybetter", GIT_COMMITTER_EMAIL="sb@strictlybetter.local")
+    p = subprocess.run(["git", "commit-tree", tree, "-p", parent, "-m", msg], cwd=home.repo, capture_output=True, text=True, env=env)
+    if p.returncode != 0:
+        raise SBError(f"commit-tree failed: {p.stderr}")
+    new_commit = p.stdout.strip()
+    k = 1 + max(int(m["id"][1:]) for m in c["frontier"])
+    vals = {}
+    sig = {}
+    for comp in conf.get("comparisons") or []:
+        if comp["id"] in c["goals"] and comp.get("valid"):
+            vals[comp["id"]] = comp.get("value")
+            sig[comp["id"]] = comp.get("sigma") or 0.0
+    member = {"id": f"f{k}", "commit": new_commit, "parent": pm["id"], "experiment": eid, "attempts": 0, "values": vals,
+              "branch": f"{c['branch']}-f{k}", "accepted_at": now_iso()}   # a sibling ref: git cannot nest refs under an existing branch name
+    git(["branch", "-f", member["branch"], new_commit], home.repo)
+    retired = []
+    for m in frontier_active(c):
+        if dominates(cards, c["goals"], vals, m["values"], sig):
+            m["retired_by"] = member["id"]
+            retired.append(m["id"])
+    c["frontier"].append(member)
+    # prune by crowding distance, never the extremes
+    active = frontier_active(c)
+    cap = int(num(c.get("frontier_max", FRONTIER_MAX), FRONTIER_MAX))
+    while len(active) > cap:
+        cd = crowding_distances(cards, c["goals"], active)
+        victim = min(active, key=lambda m: (cd.get(m["id"], 0.0), -int(m.get("attempts", 0))))
+        victim["retired_by"] = "crowding"
+        retired.append(victim["id"])
+        active = frontier_active(c)
+    pref = frontier_preferred(cards, c)
+    if pref:
+        git(["branch", "-f", c["branch"], pref["commit"]], home.repo)
+        c["preferred_member"] = pref["id"]
+    c["head_commit"] = new_commit
+    c["accepted_ids"].append(eid)
+    c["since_last_accept"] = 0
+    c["exploration_level"] = 0
+    c.setdefault("confirmed_effects", []).append(conf.get("confirm_effect"))
+    c.setdefault("holdout_gaps", []).append(gap_ratio(conf.get("screen_effect"), conf.get("confirm_effect")))
+    c["consecutive_integrity"] = 0
+    bandit_update(home, r.get("operator", "config"), True, conf.get("confirm_effect"), float((r.get("cost") or {}).get("wall_s", 0.0)))
+    worktree_drop(home, eid)
+    home.save_campaign(c)
+    home.ledger_add(eid, "accept", {"reason": "forced" if forced else "confirmed", "accepted_commit": new_commit, "branch": member["branch"],
+                                    "member": member["id"], "parent_member": pm["id"], "retired": retired, "preferred": c.get("preferred_member")})
+    print(json.dumps({"id": eid, "accepted_commit": new_commit, "member": member["id"], "parent_member": pm["id"], "retired": retired,
+                      "preferred_member": c.get("preferred_member"), "frontier_size": len(frontier_active(c)), "confirm_effect": conf.get("confirm_effect")}))
+    return 0
 
 
 def gap_ratio(screen_eff, conf_eff) -> float | None:
@@ -2597,7 +2790,10 @@ def cmd_next(home: Home, args) -> int:
              "stop_requested": stop_requested(home), "screen_untrusted": bool(c.get("screen_untrusted")), "decision_hint": s.get("decision") if "decision" in s else None,
              "max_parallel": int(num(c.get("max_parallel", 2), 2)), "distill_every": int(num(c.get("distill_every", 8), 8)), "iteration_cap": int(num(c.get("iteration_cap", DEFAULT_ITERATION_CAP), DEFAULT_ITERATION_CAP)),
              "scope_paths": c.get("scope_paths") if isinstance(c.get("scope_paths"), list) else [], "external_instruments": c.get("external_instruments_effective") if isinstance(c.get("external_instruments_effective"), list) else [],
-             "walls": c.get("walls") if isinstance(c.get("walls"), dict) else {}, "mde": c.get("mde") if isinstance(c.get("mde"), dict) else {}}
+             "walls": c.get("walls") if isinstance(c.get("walls"), dict) else {}, "mde": c.get("mde") if isinstance(c.get("mde"), dict) else {},
+             "composition": c.get("composition"), "frontier_members": frontier_active(c) if c.get("composition") == "frontier" else None,
+             "parent_member": (frontier_pick_parent(card_set(home, c), c) or {}).get("id") if c.get("composition") == "frontier" else None,
+             "preferred_member": c.get("preferred_member")}
     if args.json:
         print(json.dumps(brief, indent=2))
         return 0
@@ -2622,6 +2818,10 @@ def cmd_next(home: Home, args) -> int:
         print(f"archive hints: {archive}")
     if brief["inheritance"]:
         print(f"inheritance body: {brief['inheritance']}")
+    if brief.get("frontier_members"):
+        print(f"frontier ({len(brief['frontier_members'])} members; next parent {brief['parent_member']}; preferred {brief.get('preferred_member')}):")
+        for m in brief["frontier_members"]:
+            print(f"  {m['id']:4} {str(m['commit'])[:8]} attempts={m.get('attempts', 0)} " + " ".join(f"{g}={m['values'].get(g)}" for g in c["goals"]))
     if brief["stop_requested"]:
         print("STOP requested: finish open experiments, then stop.")
     return 0
@@ -2664,6 +2864,16 @@ def write_report(home: Home, c: dict) -> str:
     for mid in c["goals"]:
         e = b.get(mid) or {}
         lines.append(f"| {mid} | {home.load_card(mid)['direction']} | {start_vals.get(mid, '(not recorded)')} | {e.get('best')} | {e.get('sigma')} | {sum(1 for r in recs if r.get('verdict') == 'accept')} |")
+    if c.get("composition") == "frontier":
+        cards_r = card_set(home, c)
+        pref = frontier_preferred(cards_r, c)
+        lines += ["", "## Frontier (non-dominated members; pick a point, or `sb/<campaign>` already points at the preferred one)", "",
+                  "| member | from | commit | " + " | ".join(c["goals"]) + " | status |", "|---|---|---|" + "---|" * len(c["goals"]) + "---|"]
+        for m in c.get("frontier") or []:
+            st = ("retired by " + m["retired_by"]) if m.get("retired_by") else ("preferred" if pref and pref["id"] == m["id"] else "active")
+            lines.append(f"| {m['id']} | {m.get('parent') or '-'} | `{m['commit'][:10]}` | " + " | ".join(str(m['values'].get(g)) for g in c["goals"]) + f" | {st} |")
+        lines.append("")
+        lines.append("Each member beat its parent on at least one goal by the exact paired test; membership (non-dominance) is decided on stored confirm medians with the noise-floor margins and carries no error-rate claim. The global ratchet is not written by a frontier campaign.")
     lines += ["", "## Guardrails", "", "| metric | direction | start | now | status |", "|---|---|---|---|---|"]
     for mid in c["guardrails"]:
         e = b.get(mid) or {}
@@ -2701,6 +2911,26 @@ def write_report(home: Home, c: dict) -> str:
     except OSError as e:
         raise SBError(f"cannot write report: {e}")
     return out
+
+
+def cmd_frontier(home: Home, args) -> int:
+    c = require_campaign(home, running=False)
+    if c.get("composition") != "frontier":
+        raise SBError("not a frontier campaign")
+    cards = card_set(home, c)
+    pref = frontier_preferred(cards, c)
+    rows = []
+    for m in c.get("frontier") or []:
+        rows.append({"id": m["id"], "commit": m["commit"], "parent": m.get("parent"), "experiment": m.get("experiment"), "attempts": m.get("attempts", 0),
+                     "values": m.get("values"), "retired_by": m.get("retired_by"), "branch": m.get("branch"), "preferred": bool(pref and pref["id"] == m["id"])})
+    if args.json:
+        print(json.dumps({"goals": c["goals"], "members": rows, "preferred": pref["id"] if pref else None, "preference": c.get("preference")}, indent=2))
+        return 0
+    print(f"frontier of campaign {c['id']} · goals {c['goals']} · preferred {pref['id'] if pref else None}" + (f" (weights {c['preference'].get('weights')})" if c.get('preference') else " (knee: max of min normalized gain)"))
+    for row in rows:
+        flag = " retired:" + row["retired_by"] if row["retired_by"] else (" *" if row["preferred"] else "")
+        print(f"  {row['id']:4} {row['commit'][:8]} from {row['parent'] or '-':4} exp {row['experiment'] or '-':6} attempts={row['attempts']} " + " ".join(f"{g}={row['values'].get(g)}" for g in c["goals"]) + flag)
+    return 0
 
 
 def cmd_report(home: Home, args) -> int:
@@ -3450,6 +3680,90 @@ def selftest() -> int:
         check("service not ready -> invalid, not a crash", r["judge_stat"]["verdict"] == "discard" and r["judge_stat"]["reason"] == "invalid")
         for name in list(os.listdir(home.wt_dir)):
             worktree_drop(home, name)
+    # --- frontier campaign on a planted trade-off (speed vs quality)
+    with tempfile.TemporaryDirectory() as td:
+        repo = os.path.join(td, "repo")
+        os.makedirs(repo)
+        git(["init", "-q", "-b", "main"], repo)
+        git(["config", "user.email", "t@t"], repo)
+        git(["config", "user.name", "t"], repo)
+        with open(os.path.join(repo, "work.py"), "w") as f:
+            f.write("A = 40\nB = 80\n")
+        with open(os.path.join(repo, "bench.py"), "w") as f:
+            f.write("import work, os, random\nr = random.Random(int(os.environ.get('SB_SEED', '0')))\n"
+                    "print('METRIC speed=%d' % (work.A + r.randint(0, 1)))\nprint('METRIC quality=%d' % (work.B + r.randint(0, 1)))\n")
+        git(["add", "-A"], repo)
+        git(["commit", "-q", "-m", "base"], repo)
+        home = Home(repo=repo, home=os.path.join(repo, ".strictlybetter"))
+        home.ensure()
+        fid = {"screen": {"repeats": 1}, "confirm": {"repeats": 10, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}}
+        for mid, direction in (("speed", "minimize"), ("quality", "maximize")):
+            home.save_card({"id": mid, "kind": "goal", "direction": direction, "measure": {"command": "python3 bench.py", "parse": f"metric-line:{mid}", "timeout_s": 60},
+                            "fidelity": fid, "integrity": {"frozen_paths": ["bench.py"]}, "gaming_risks": ["x"], "contention_safe": True, "reuse_output": mid == "quality"})
+        sp = os.path.join(td, "c.json")
+        write_json_atomic(sp, {"id": "fr", "composition": "frontier", "goals": ["speed", "quality"], "budget": {"experiments": 6}})
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_campaign(home, argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=4, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
+        c = home.campaign()
+        check("frontier seeded with the base member", c.get("composition") == "frontier" and [m["id"] for m in c["frontier"]] == ["f0"])
+        def run_trade(a, b, hyp, expect_accept):
+            hp = os.path.join(td, "h.json")
+            write_json_atomic(hp, {"operator": "config", "target": "work.py", "hypothesis": hyp, "predicted": {"speed": "-1..50%"}})
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                cmd_prereg(home, argparse.Namespace(file=hp, parent=None))
+            info = json.loads(out.getvalue())
+            with open(os.path.join(home.wt_dir, info["id"], "work.py"), "w") as f:
+                f.write(f"A = {a}\nB = {b}\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_submit(home, argparse.Namespace(id=info["id"]))
+                cmd_measure(home, argparse.Namespace(id=info["id"], fidelity="screen", repeats=None, keep_runs=False, audit=False))
+                cmd_judge(home, argparse.Namespace(id=info["id"], fidelity="screen"))
+            rr = home.experiments()[info["id"]]
+            if rr["judge_stat"]["verdict"] != "promote":
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cmd_discard(home, argparse.Namespace(id=info["id"], reason="noise", archive=False))
+                return info["id"], "screen:" + rr["judge_stat"]["reason"], info["parent_member"]
+            write_json_atomic(vp2 := os.path.join(td, "v.json"), {"verdict": "clean", "pattern": "", "evidence": "", "recommended_check": ""})
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_judge_verdict(home, argparse.Namespace(id=info["id"], file=vp2))
+                cmd_confirm(home, argparse.Namespace(id=info["id"], force=False))
+            rr = home.experiments()[info["id"]]
+            if rr["confirm"]["verdict"] == "accept":
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cmd_accept(home, argparse.Namespace(id=info["id"], force=False))
+                return info["id"], "accept:" + rr["confirm"]["reason"], info["parent_member"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_discard(home, argparse.Namespace(id=info["id"], reason="noise", archive=False))
+            return info["id"], "discard:" + rr["confirm"]["reason"], info["parent_member"]
+        e, res, par = run_trade(20, 60, "faster, lower quality (trade-off)", True)   # from f0 (40,80)
+        check("trade-off joins the frontier", res.startswith("accept:frontier:improved:speed") and "traded:quality" in res and par == "f0")
+        c = home.campaign()
+        check("f0 stays (not dominated)", [m["id"] for m in frontier_active(c)] == ["f0", "f1"])
+        e, res, par = run_trade(30, 70, "middle point", True)                         # parent = f0 (fewest attempts among extremes) or f1
+        check("middle point is non-dominated and joins", res.startswith("accept:frontier"))
+        c = home.campaign()
+        check("three active members", len(frontier_active(c)) == 3)
+        # a point dominated by f1 (20,60): worse on both from whichever parent -> never improves a goal vs parent, or dominated
+        e, res, par = run_trade(25, 55, "worse on both vs f1", False)
+        check("dominated or non-improving point is rejected", not res.startswith("accept"))
+        # a point that dominates f1: speed 15, quality 60 (from any parent it improves speed; not worse on quality vs f1)
+        e, res, par = run_trade(15, 60, "faster at same quality as f1", True)
+        c = home.campaign()
+        f1 = next(m for m in c["frontier"] if m["id"] == "f1")
+        check("dominating point retires the dominated member", res.startswith("accept:frontier") and f1.get("retired_by") is not None)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cmd_frontier(home, argparse.Namespace(json=True))
+        fr = json.loads(out.getvalue())
+        check("frontier command lists members and a preferred point", len(fr["members"]) >= 3 and fr["preferred"] is not None)
+        check("campaign branch points at the preferred member", git(["rev-parse", c["branch"]], repo) == next(m for m in c["frontier"] if m["id"] == fr["preferred"])["commit"])
+        check("frontier campaign writes no global ratchet", home.ratchet() == {})
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_report(home, argparse.Namespace())
+        check("report has the frontier table", "## Frontier" in open(home.p("reports", "fr.md")).read())
+        for name in list(os.listdir(home.wt_dir)):
+            worktree_drop(home, name)
     failed = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(f"{'ok  ' if ok else 'FAIL'} {n}")
@@ -3472,7 +3786,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("baseline"); sp.add_argument("--metric"); sp.add_argument("-k", "--repeats", type=int); sp.add_argument("--levels")
     sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int); sp.add_argument("--allow-unusable", action="store_true", help="start even if a goal's minimum detectable effect exceeds the usable limit"); sp.add_argument("--allow-ratchet-regression", action="store_true", help="start even if HEAD is worse than a past campaign's ratcheted best"); sp.add_argument("--allow-underpowered", action="store_true", help="start even if a goal's confirm pairs cannot reach the per-test alpha (no acceptance will be possible)")
     sp = sub.add_parser("next"); sp.add_argument("--json", action="store_true"); sp.add_argument("--seed", type=int)
-    sp = sub.add_parser("prereg"); sp.add_argument("--file", default="-")
+    sp = sub.add_parser("prereg"); sp.add_argument("--file", default="-"); sp.add_argument("--parent", help="frontier campaigns: the member id to branch from (default: the engine's pick)")
     sp = sub.add_parser("submit"); sp.add_argument("id")
     sp = sub.add_parser("measure"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full", "confirm"], default="screen"); sp.add_argument("--repeats", type=int); sp.add_argument("--keep-runs", action="store_true"); sp.add_argument("--audit", action="store_true", help="human audit: allow a confirm-fidelity measurement while running")
     sp = sub.add_parser("judge"); sp.add_argument("id"); sp.add_argument("--fidelity", choices=["screen", "full"], default="screen")
@@ -3485,6 +3799,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("distill-stats"); sp.add_argument("--json", action="store_true")
     sp = sub.add_parser("status"); sp.add_argument("--json", action="store_true")
     sub.add_parser("report")
+    sp = sub.add_parser("frontier"); sp.add_argument("--json", action="store_true")
     sub.add_parser("budget")
     sp = sub.add_parser("guard"); sp.add_argument("path", nargs="?"); sp.add_argument("--stdin", action="store_true")
     sub.add_parser("session-start")
@@ -3504,7 +3819,7 @@ HANDLERS = {
     "judge-verdict": cmd_judge_verdict, "judge-payload": cmd_judge_payload, "confirm": cmd_confirm, "accept": cmd_accept, "discard": cmd_discard, "cost": cmd_cost,
     "distill-stats": cmd_distill_stats, "status": cmd_status, "report": cmd_report, "budget": cmd_budget, "guard": cmd_guard,
     "session-start": cmd_session_start, "doctor": cmd_doctor, "stop": cmd_stop, "ledger": cmd_ledger, "inheritance": cmd_inheritance,
-    "worktree": cmd_worktree, "drive": cmd_drive,
+    "worktree": cmd_worktree, "drive": cmd_drive, "frontier": cmd_frontier,
 }
 MUTATING = {"init", "profile", "card", "baseline", "campaign", "prereg", "submit", "measure", "judge", "judge-verdict",
             "confirm", "accept", "discard", "cost", "distill-stats", "stop", "inheritance", "worktree"}
