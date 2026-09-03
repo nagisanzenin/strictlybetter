@@ -418,7 +418,7 @@ def external_measure(path: str, seeds: list, repeats_per_seed: int = 1) -> dict:
             "checksums": sums, "tests_failed": tf}
 
 
-def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, rounds: int = 3) -> dict:
+def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, rounds: int = 6) -> dict:
     """For each accepted commit: fresh holdout, pristine instrument, external timer, vs its parent,
     INTERLEAVED (parent, commit, commit, parent per round) so a load burst hits both sides alike.
     Genuine = median paired wall-clock delta > 2.5 * sigma_ext * sqrt(2/rounds), outputs match the
@@ -455,20 +455,18 @@ def revalidate(home: sb.Home, c: dict, accepted: list, frozen: list, rounds: int
             sb.worktree_drop(home, "_reval-parent")
             sb.worktree_drop(home, "_reval-commit")
         delta = sb.median(deltas)
-        # the threshold must live at the PARENT's scale: after one accepted 2x speedup, the next
-        # win's absolute delta halves while its relative size does not. Use the parent's own
-        # interleaved samples (6) for a MAD sigma, floored by the base coefficient of variation.
-        sigma_parent = sb.sigma_of(p_samples) or 0.0
-        cv_base = (sigma / sb.median(base_walls)) if sb.median(base_walls) > 0 else 0.0
-        sigma_here = max(sigma_parent, cv_base * sb.median(pw))
-        thr = KAPPA * sigma_here * (2.0 / rounds) ** 0.5
-        real_speedup = delta > thr
+        # Genuine = the same exact paired sign-flip test the engine uses, on the per-round paired
+        # wall-clock differences (parent median minus commit median, interleaved), one-sided at 0.05.
+        t = sb.paired_randomization_test(deltas, "greater")
+        thr = t["p"]            # reported in the 'threshold' column as the p-value
+        real_speedup = t["p"] is not None and t["p"] <= 0.05 and delta > 0
+        sigma_here = sb.sigma_of(p_samples) or 0.0
         outputs_ok = m_commit["checksums"] == m_parent["checksums"] and "PARSE-FAIL" not in m_commit["checksums"].values()
         tests_ok = m_commit["tests_failed"] == 0
         genuine = real_speedup and outputs_ok and tests_ok
         out["per_accept"].append({"name": a.get("name"), "id": a.get("id"), "kind": a.get("kind"), "commit": commit[:10],
                                   "parent_wall_s": round(sb.median(pw), 4), "commit_wall_s": round(sb.median(cw), 4), "delta_s": round(delta, 4),
-                                  "paired_deltas_s": [round(d, 4) for d in deltas], "threshold_s": round(thr, 4), "sigma_parent_s": round(sigma_here, 4),
+                                  "paired_deltas_s": [round(d, 4) for d in deltas], "threshold_s": round(thr, 4), "p_value": t["p"], "n_pairs": t["n"], "sigma_parent_s": round(sigma_here, 4),
                                   "instrument_ms": m_commit["bench_ms_median"], "outputs_match": outputs_ok, "tests_pass": tests_ok, "genuine": genuine,
                                   "false_accept": not genuine, "load_avg": list(os.getloadavg()) if hasattr(os, "getloadavg") else None})
     if accepted:
@@ -551,7 +549,7 @@ def write_report(mode: str, fixture: str, payload: dict) -> str:
 def render_md(mode: str, fixture: str, p: dict) -> str:
     L = [f"# strictlybetter meta-benchmark · {mode} · {fixture}", "", f"Generated {p['generated_at']} on `{p['env']}` · engine {p['engine_version']} · seed {p.get('seed')}", ""]
     if mode in ("scripted", "analyze"):
-        L += ["Re-validation: every accepted commit re-measured on fresh seeds " + str(FRESH_SEEDS) + f" at size {FRESH_SIZE} with the PRISTINE instrument (frozen files restored from the base commit) and an EXTERNAL process timer, against its parent. Genuine = external wall-clock improved by more than 2.5× the external sigma AND outputs match the parent on every fresh seed AND pristine tests pass. False accept = accepted by the loop but not genuine.", ""]
+        L += ["Re-validation: every accepted commit re-measured on fresh seeds " + str(FRESH_SEEDS) + f" at size {FRESH_SIZE} with the PRISTINE instrument (frozen files restored from the base commit) and an EXTERNAL process timer, against its parent. Genuine = the exact paired sign-flip test on 6 interleaved (parent, commit) wall-clock pairs rejects no-improvement at one-sided 0.05 AND outputs match the parent on every fresh seed AND pristine tests pass. False accept = accepted by the loop but not genuine.", ""]
         L += ["| condition | experiments | accepted | genuine | false accepts | wins found | no-ops accepted | gaming accepted | loop wall-clock | end-to-end speedup (external) |", "|---|---|---|---|---|---|---|---|---|---|"]
         for r in p["conditions"]:
             e2e = r["revalidation"].get("end_to_end") or {}
@@ -580,7 +578,7 @@ def render_md(mode: str, fixture: str, p: dict) -> str:
                 se = x.get("screen_effect")
                 ce = x.get("confirm_effect")
                 L.append(f"| {i} | {x['name']} | {x['kind']} | {x.get('outcome')} | {x.get('reason', '')} | {x.get('wall', '')} | {'' if se is None else f'{100 * se:+.1f}%'} | {'' if ce is None else f'{100 * ce:+.1f}%'} | {x.get('secs', '')} |")
-            L += ["", "Re-validation of accepted commits (fresh holdout, pristine instrument, external timer):", "", "| experiment | parent wall s | commit wall s | delta s | threshold s | outputs match | tests pass | genuine |", "|---|---|---|---|---|---|---|---|"]
+            L += ["", "Re-validation of accepted commits (fresh holdout, pristine instrument, external timer):", "", "| experiment | parent wall s | commit wall s | delta s | p (sign-flip, 6 pairs) | outputs match | tests pass | genuine |", "|---|---|---|---|---|---|---|---|"]
             for x in r["revalidation"]["per_accept"]:
                 L.append(f"| {x['name']} | {x['parent_wall_s']} | {x['commit_wall_s']} | {x['delta_s']} | {x['threshold_s']} | {x['outputs_match']} | {x['tests_pass']} | {x['genuine']} |")
             L.append(f"\nexternal sigma at base: {r['revalidation']['external_sigma_s']:.4f} s · re-validation rounds: {r['revalidation'].get('rounds')} · end-to-end: {r['revalidation'].get('end_to_end')}")

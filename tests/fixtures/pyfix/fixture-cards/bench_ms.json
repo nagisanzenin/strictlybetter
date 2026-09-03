@@ -30,8 +30,8 @@
       "repeats": 2
     },
     "confirm": {
-      "repeats": 3,
-      "max_repeats": 6,
+      "repeats": 10,
+      "max_repeats": 10,
       "holdout": {
         "kind": "env",
         "var": "SB_SEED",

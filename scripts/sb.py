@@ -64,7 +64,13 @@ NEW_DEP_PENALTY = 1.0       # extra sigma required per new dependency manifest t
 PATIENCE = 8                # experiments without acceptance before exploration rises
 EXPLORATION_MAX = 3
 BASELINE_REPEATS = 5
-CONFIRM_REPEATS = 3
+CONFIRM_REPEATS = 10         # paired repeats at confirm; 2^-10 lets an exact test reach alpha/K for K <= 50 at alpha 0.05
+ALPHA_CAMPAIGN = 0.05        # family-wise one-sided false-accept probability per campaign (multiplicity: bonferroni over the budget)
+ALPHA_GUARDRAIL = 0.10       # one-sided evidence-of-regression alarm per guardrail per confirmation (more sensitive than the goal test)
+POCOCK_TWO_LOOK = 0.59       # per-look alpha fraction for a two-stage design (Pocock, two looks, approx.)
+PERM_EXACT_MAX_PAIRS = 20    # exact sign-flip enumeration up to 2^20; Monte Carlo above
+PERM_MC_SAMPLES = 20000
+PERM_MC_SEED = 20260903
 ANOMALY_MULT = 3.0          # effect > 3x rolling mean of confirmed effects, after plateau
 FP_WINDOW = 10              # false-promotion window (promotions)
 FP_MAX_FRACTION = 0.4
@@ -1626,6 +1632,27 @@ def campaign_start(home: Home, args) -> int:
     c3 = home.campaign()
     c3["card_hashes"] = {m: card_fingerprint(home.load_card(m)) for m in goals + guardrails + diagnostics}
     c3["start_values"] = {m: (b.get(m) or {}).get("best") for m in goals + guardrails + diagnostics}
+    c3["alpha"] = float(num(spec.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN))
+    c3["multiplicity"] = spec.get("multiplicity", "bonferroni")
+    c3["alpha_test"] = alpha_per_test(c3)
+    # power gate: with r pairs the exact test's smallest p is 2^-r; a card that cannot reach alpha_test
+    # (or alpha_look in a two-stage design) can never accept anything and must not start.
+    if walls.get("paired", True) and walls.get("noise_floor", True):
+        for m in goals:
+            card = home.load_card(m)
+            if card["direction"] == "equal":
+                continue
+            st = (card.get("fidelity") or {}).get("confirm", {}).get("stages")
+            if isinstance(st, list) and len(st) == 2:
+                r_total, a_look = int(st[0]) + int(st[1]), c3["alpha_test"] * POCOCK_TWO_LOOK
+            else:
+                r_total, a_look = fidelity_spec(card, "confirm")["repeats"], c3["alpha_test"]
+            need = math.ceil(-math.log2(a_look))
+            if 2.0 ** (-r_total) > a_look and not args.allow_underpowered:
+                halt(home, home.campaign(), f"underpowered:{m}:pairs={r_total}:alpha={a_look:.4g}")
+                raise SBError(f"goal {m}: {r_total} confirm pairs cannot reach the per-test alpha {a_look:.4g} (smallest attainable p is 2^-{r_total} = {2.0 ** (-r_total):.4g}); "
+                              f"set fidelity.confirm.repeats to at least {need} (or stages summing to it), raise alpha, shrink the experiment budget, or pass --allow-underpowered. Campaign halted.")
+    home.save_campaign(c3)
     home.save_campaign(c3)
     for mid, rec in ratchet.items():
         if mid in guardrails and not rec.get("demoted") and rec.get("best") is not None:
@@ -1994,57 +2021,65 @@ def cmd_confirm(home: Home, args) -> int:
                 home.ledger_add(eid, "confirm", out)
                 print(json.dumps({k: v for k, v in out.items() if k != "comparisons"}))
                 return 0
-        # confirm with holdout and adaptive repeats
-        results = {}
+        # confirm: pre-registered number of pairs, optionally in two Pocock stages. No open-ended
+        # "add repeats until it wins": the sample size is fixed before the data (docs/04 §4.2).
+        results, stat_tests = {}, {}
         anomaly = bool(js.get("anomaly")) or (r.get("judge") or {}).get("verdict") == "suspicious"
+        stages_by_card = {}
         for mid in list(c["goals"]) + list(c["guardrails"]) + list(c["diagnostics"]):
             card = cards[mid]
             spec = fidelity_spec(card, "confirm")
             if spec.get("skip"):
                 continue
-            reps = spec["max_repeats"] if anomaly else spec["repeats"]
-            if paired:
-                results[mid], head_results[mid] = measure_paired(home, card, "confirm", checkout, head_checkout, reps, c, walls.get("holdout", True))
+            st = (card.get("fidelity") or {}).get("confirm", {}).get("stages")
+            if isinstance(st, list) and len(st) == 2 and all(isinstance(x, int) and x > 0 for x in st):
+                stages_by_card[mid] = list(st)
             else:
-                results[mid] = measure_card(home, card, "confirm", checkout, repeats=reps, campaign=c, use_holdout=walls.get("holdout", True))
-        comps, ke = comparisons_for(home, c, r, "confirm", results, bases=fresh_bases(home, c, "confirm", head_results) if paired else None)
-        d = decide(cards, c, comps, "confirm")
-        rounds = 1
-        while d["verdict"] == "inconclusive":
-            grew = False
-            for mid in list(c["goals"]):
+                stages_by_card[mid] = [spec["max_repeats"] if anomaly else spec["repeats"]]
+        looks = max(len(v) for v in stages_by_card.values()) if stages_by_card else 1
+        d = {"verdict": "inconclusive"}
+        rounds = 0
+        for look in range(1, looks + 1):
+            for mid, st in stages_by_card.items():
+                if look > len(st):
+                    continue
                 card = cards[mid]
-                spec = fidelity_spec(card, "confirm")
-                cur = results[mid]
-                if cur["n"] < spec["max_repeats"]:
-                    k_more = min(2, spec["max_repeats"] - cur["n"])
-                    if paired:
-                        more, more_h = measure_paired(home, card, "confirm", checkout, head_checkout, k_more, c, walls.get("holdout", True))
-                        hh = head_results.get(mid) or {"runs": []}
-                        merged_h = (hh.get("runs") or []) + (more_h.get("runs") or [])
-                        sh = summarize(merged_h, card)
-                        sh["runs"] = merged_h
-                        sh["fidelity"] = "confirm"
-                        head_results[mid] = sh
-                    else:
-                        more = measure_card(home, card, "confirm", checkout, repeats=k_more, campaign=c, use_holdout=walls.get("holdout", True))
-                    merged_runs = (cur.get("runs") or []) + (more.get("runs") or [])
-                    s = summarize(merged_runs, card)
-                    s["runs"] = merged_runs
-                    s["fidelity"] = "confirm"
-                    results[mid] = s
-                    grew = True
-            if not grew:
-                d["verdict"], d["reason"] = "discard", "noise"
-                break
+                reps = st[look - 1]
+                if paired:
+                    more, more_h = measure_paired(home, card, "confirm", checkout, head_checkout, reps, c, walls.get("holdout", True))
+                    prev, prev_h = results.get(mid), head_results.get(mid)
+                    if prev:
+                        merged = (prev.get("runs") or []) + (more.get("runs") or [])
+                        more = summarize(merged, card); more["runs"] = merged; more["fidelity"] = "confirm"
+                        merged_h = (prev_h.get("runs") or []) + (more_h.get("runs") or [])
+                        more_h = summarize(merged_h, card); more_h["runs"] = merged_h; more_h["fidelity"] = "confirm"
+                    results[mid], head_results[mid] = more, more_h
+                else:
+                    more = measure_card(home, card, "confirm", checkout, repeats=reps, campaign=c, use_holdout=walls.get("holdout", True))
+                    prev = results.get(mid)
+                    if prev:
+                        merged = (prev.get("runs") or []) + (more.get("runs") or [])
+                        more = summarize(merged, card); more["runs"] = merged; more["fidelity"] = "confirm"
+                    results[mid] = more
+            rounds = look
             comps, ke = comparisons_for(home, c, r, "confirm", results, bases=fresh_bases(home, c, "confirm", head_results) if paired else None)
-            d = decide(cards, c, comps, "confirm")
-            rounds += 1
+            if paired and walls.get("noise_floor", True):
+                d = confirm_decision(cards, c, results, head_results, comps, look, looks)
+                stat_tests = d.get("tests", {})
+            else:
+                d = decide(cards, c, comps, "confirm")   # unpaired or naive: the heuristic rule, no error rate claimed
+                if d["verdict"] == "inconclusive":
+                    d["verdict"], d["reason"] = ("inconclusive", "stage-continue") if look < looks else ("discard", "noise")
+            if d["verdict"] != "inconclusive":
+                break
+        if d["verdict"] == "inconclusive":
+            d["verdict"], d["reason"] = "discard", "noise"
         # holdout gap and effects
         screen_eff = primary_goal_effect(c, (js.get("comparisons") or []))
         conf_eff = primary_goal_effect(c, comps)
         out = {"verdict": "accept" if d["verdict"] == "promote" else "discard", "reason": d["reason"], "level": "confirm", "commit": r["commit"],
                "rounds": rounds, "anomaly_extra_repeats": anomaly, "screen_effect": screen_eff, "confirm_effect": conf_eff, "paired": paired,
+               "tests": stat_tests, "alpha_campaign": d.get("alpha_campaign"), "alpha_test": d.get("alpha_test"), "alpha_look": d.get("alpha_look"), "looks": looks,
                "comparisons": comps, "results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in results.items()},
                "head_results": {k: {kk: vv for kk, vv in v.items() if kk != "runs"} for k, v in head_results.items()}, "kappa_eff": ke}
     finally:
@@ -2067,6 +2102,9 @@ def provenance_block(r: dict, conf: dict, c: dict) -> str:
     for comp in conf.get("comparisons") or []:
         if comp["kind"] in ("goal", "guardrail"):
             lines.append(f"{comp['id']}: {comp['baseline']} -> {comp['value']} (delta {comp['delta']}, sigma {comp['sigma']}, thr {comp['threshold']}) {'IMPROVED' if comp['improved'] else 'held'}")
+    for mid, t in (conf.get("tests") or {}).items():
+        if t.get("kind") == "paired-sign-flip":
+            lines.append(f"test {mid}: paired sign-flip ({t.get('alternative')}), n_pairs={t.get('n_pairs')}, p={t.get('p')}, alpha={t.get('alpha')}, median_diff={t.get('median_diff')}")
     j = r.get("judge") or {}
     lines.append(f"judge: {j.get('verdict', 'n/a')} {j.get('pattern', '')}".rstrip())
     lines.append(f"confirmation: level={conf.get('level')} rounds={conf.get('rounds')} holdout={'yes' if c.get('walls', {}).get('holdout', True) else 'no'} paired={'yes' if conf.get('paired') else 'no'} kappa_eff={conf.get('kappa_eff')}")
@@ -2169,6 +2207,139 @@ def cmd_accept(home: Home, args) -> int:
         halt(home, c, f"holdout-gap:{sum(gaps) / len(gaps):.2f}")
     print(json.dumps({"id": eid, "accepted_commit": new_commit, "branch": c["branch"], "confirm_effect": conf.get("confirm_effect")}))
     return 0
+
+
+def paired_randomization_test(diffs: list, alternative: str = "greater") -> dict:
+    """Exact Fisher–Pitman sign-flip test on paired differences d_i (candidate vs head measured
+    interleaved, same holdout value in each pair). Under H0 (no effect) the sign of every d_i is
+    exchangeable, so the mean of the differences under all 2^r sign assignments is the exact null
+    distribution. One-sided p = fraction of assignments whose mean is >= the observed mean
+    (alternative "greater") or <= (alternative "less"). Distribution-free; valid for any r; the
+    smallest attainable p is 2^-r, which is why the campaign-start gate checks r against alpha.
+    Ties (zero differences) are kept: they neither help nor hurt, exactly as in the exact test."""
+    d = [float(x) for x in diffs if x is not None and x == x]
+    r = len(d)
+    if r == 0:
+        return {"p": None, "stat": None, "n": 0, "exact": True, "min_p": None}
+    obs = sum(d) / r
+    if alternative == "less":
+        d = [-x for x in d]
+        obs = -obs
+    if r <= PERM_EXACT_MAX_PAIRS:
+        count = 0
+        total = 1 << r
+        for mask in range(total):
+            tot = 0.0
+            for i in range(r):
+                tot += d[i] if (mask >> i) & 1 else -d[i]
+            if tot / r >= obs - 1e-12:
+                count += 1
+        p = count / total
+        exact = True
+    else:
+        rng = random.Random(PERM_MC_SEED)
+        count = 0
+        for _ in range(PERM_MC_SAMPLES):
+            tot = 0.0
+            for x in d:
+                tot += x if rng.random() < 0.5 else -x
+            if tot / r >= obs - 1e-12:
+                count += 1
+        p = (count + 1) / (PERM_MC_SAMPLES + 1)
+        exact = False
+    return {"p": p, "stat": (obs if alternative != "less" else -obs), "n": r, "exact": exact, "min_p": 2.0 ** (-r)}
+
+
+def paired_diffs(card: dict, cand: dict, head: dict) -> list:
+    """Improvement per pair, signed so that positive = better for the card's direction."""
+    sgn = card_sign(card)
+    rc = [x for x in (cand.get("runs") or []) if x.get("valid") and isinstance(x.get("value"), float)]
+    rh = [x for x in (head.get("runs") or []) if x.get("valid") and isinstance(x.get("value"), float)]
+    n = min(len(rc), len(rh))
+    return [sgn * (rc[i]["value"] - rh[i]["value"]) for i in range(n)]
+
+
+def alpha_per_test(c: dict) -> float:
+    """Per-confirmation one-sided alpha after multiplicity control over the PRE-REGISTERED budget."""
+    alpha = float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN))
+    mult = c.get("multiplicity", "bonferroni")
+    k = int(num((c.get("budget") or {}).get("experiments", 0), 0))
+    if mult == "bonferroni" and k > 0:
+        return alpha / k
+    return alpha
+
+
+def confirm_decision(cards: dict, c: dict, results: dict, head_results: dict, comps: list, look: int, looks: int) -> dict:
+    """The confirmation verdict with a stated error rate. Goals: exact paired randomization test
+    (one-sided, alternative = improvement) at alpha_look, AND a practical floor (card
+    acceptance.min_effect_rel of the head median; default 0). Guardrails (numeric): evidence of
+    regression at ALPHA_GUARDRAIL, or a median regression beyond the tolerance, blocks. Equal
+    guardrails: exact match. A two-stage design spends alpha with Pocock's constant per look."""
+    a_test = alpha_per_test(c)
+    a_look = a_test * (POCOCK_TWO_LOOK if looks > 1 else 1.0)
+    tests = {}
+    regressed, improved, invalid, inconclusive = [], [], [], []
+    for comp in comps:
+        mid = comp["id"]
+        card = cards[mid]
+        if not comp.get("valid"):
+            if mid in c["goals"] or mid in c["guardrails"]:
+                invalid.append(mid)
+            continue
+        if card["direction"] == "equal":
+            if comp.get("regressed"):
+                regressed.append(mid)
+            tests[mid] = {"kind": "exact-equality", "regressed": bool(comp.get("regressed"))}
+            continue
+        d = paired_diffs(card, results.get(mid) or {}, head_results.get(mid) or {})
+        if not d:
+            tests[mid] = {"kind": "unpaired-fallback", "note": "no paired runs; heuristic comparison used"}
+            if comp.get("improved") and mid in c["goals"]:
+                improved.append(mid)
+            if comp.get("regressed"):
+                regressed.append(mid)
+            continue
+        med = statistics.median(d)
+        if mid in c["goals"]:
+            t = paired_randomization_test(d, "greater")
+            floor_rel = float(num((card.get("acceptance") or {}).get("min_effect_rel", 0.0), 0.0))
+            head_med = float(comp.get("baseline") or 0.0)
+            floor_abs = floor_rel * abs(head_med)
+            ok_p = t["p"] is not None and t["p"] <= a_look
+            ok_floor = med >= floor_abs
+            tests[mid] = {"kind": "paired-sign-flip", "alternative": "improvement", "p": t["p"], "alpha": a_look, "n_pairs": t["n"], "exact": t["exact"],
+                          "mean_diff": t["stat"], "median_diff": med, "min_effect_abs": floor_abs, "significant": ok_p, "practical": ok_floor}
+            if ok_p and ok_floor:
+                improved.append(mid)
+            elif t["p"] is not None and t["stat"] is not None and t["stat"] > 0 and t["p"] < 0.5:
+                inconclusive.append(mid)
+            # a goal that got significantly WORSE is a regression too
+            t2 = paired_randomization_test(d, "less")
+            tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA)) * float(comp.get("sigma") or 0.0)
+            if (t2["p"] is not None and t2["p"] <= ALPHA_GUARDRAIL and med < 0) or (-med > tol and tol > 0) or (tol == 0 and med < 0 and t2["p"] is not None and t2["p"] <= ALPHA_GUARDRAIL):
+                regressed.append(mid)
+                tests[mid]["regression_p"] = t2["p"]
+        else:
+            t2 = paired_randomization_test(d, "less")   # alternative: regression (improvement negative)
+            tol = float((card.get("acceptance") or {}).get("tolerance_sigma", TOLERANCE_SIGMA)) * float(comp.get("sigma") or 0.0)
+            reg = (t2["p"] is not None and t2["p"] <= ALPHA_GUARDRAIL and med < 0) or (tol > 0 and -med > tol) or (tol == 0 and med < 0 and all(x <= 0 for x in d) and any(x < 0 for x in d))
+            tests[mid] = {"kind": "paired-sign-flip", "alternative": "regression", "p": t2["p"], "alpha": ALPHA_GUARDRAIL, "n_pairs": t2["n"], "exact": t2["exact"],
+                          "median_diff": med, "tolerance_abs": tol, "regressed": bool(reg)}
+            if reg:
+                regressed.append(mid)
+    out = {"level": "confirm", "alpha_campaign": float(num(c.get("alpha", ALPHA_CAMPAIGN), ALPHA_CAMPAIGN)), "alpha_test": a_test, "alpha_look": a_look,
+           "look": look, "looks": looks, "multiplicity": c.get("multiplicity", "bonferroni"), "tests": tests, "improved": improved, "regressed": regressed, "invalid": invalid}
+    if invalid and c.get("walls", {}).get("validity", True):
+        out["verdict"], out["reason"] = "discard", "invalid"
+    elif regressed:
+        out["verdict"], out["reason"] = "discard", f"regression:{regressed[0]}"
+    elif improved:
+        out["verdict"], out["reason"] = "promote", "improved:" + ",".join(improved)
+    elif inconclusive and look < looks:
+        out["verdict"], out["reason"] = "inconclusive", "stage-continue"
+    else:
+        out["verdict"], out["reason"] = "discard", "noise"
+    return out
 
 
 def gap_ratio(screen_eff, conf_eff) -> float | None:
@@ -2305,6 +2476,9 @@ def stats(home: Home, c: dict) -> dict:
         "confirmed_effects": effects, "mean_confirmed_effect": (sum(effects) / len(effects)) if effects else None,
         "holdout_gap_mean_last5": (sum(gaps[-5:]) / len(gaps[-5:])) if gaps else None,
         "since_last_accept": int(num(c.get("since_last_accept", 0))), "exploration_level": int(num(c.get("exploration_level", 0))),
+        "alpha_campaign": c.get("alpha"), "alpha_test": c.get("alpha_test"), "multiplicity": c.get("multiplicity"),
+        "confirmations_run": sum(1 for r in recs if r.get("confirm")),
+        "expected_false_accepts_upper": (round(float(c.get("alpha_test") or 0) * sum(1 for r in recs if r.get("confirm")), 4) if c.get("alpha_test") else None),
         "budget_left": budget_left(c), "budget_exhausted": budget_exhausted(c),
     }
 
@@ -2475,7 +2649,8 @@ def write_report(home: Home, c: dict) -> str:
     lines += ["", "## Cost", "", f"- experiments: {s['experiments']} (promoted {s['promoted']}, accepted {s['accepted']}, discarded {s['discarded']})",
               f"- discard reasons: {s['discard_reasons']}", f"- wall-clock charged (measurement plus experimenter time reported via `sb cost`): {s['wall_s']} s", f"- dollars: {s['dollars_est']} (estimated from reported tokens at the campaign's pricing table" + (f"; {s['dollars_unknown_experiments']} experiment(s) reported no tokens, so the total is unknown" if s.get('dollars_unknown_experiments') else "") + ")",
               f"- per accepted improvement: {s['wall_s_per_accept']} s, ${s['dollars_per_accept']}", f"- false promotions: {s['false_promotions']} (window rate {s['false_promotion_rate_window']})",
-              f"- holdout gap (mean of last 5 accepted): {s['holdout_gap_mean_last5']}", f"- walls: {', '.join(k for k, v in c.get('walls', {}).items() if v) or 'none (naive)'}", "",
+              f"- holdout gap (mean of last 5 accepted): {s['holdout_gap_mean_last5']}",
+              f"- acceptance test: exact paired sign-flip, one-sided; family-wise alpha {s.get('alpha_campaign')} ({s.get('multiplicity')} over the pre-registered budget) → per-confirmation alpha {s.get('alpha_test')}; confirmations run {s.get('confirmations_run')}; expected false accepts if every candidate were null: ≤ {s.get('expected_false_accepts_upper')}", f"- walls: {', '.join(k for k, v in c.get('walls', {}).items() if v) or 'none (naive)'}", "",
               "## Accepted changes", ""]
     for r in recs:
         if r.get("verdict") == "accept":
@@ -2790,6 +2965,18 @@ def selftest() -> int:
     d = decide({}, camp, [compare_metric(goal, base, {"valid": False, "invalid": ["timeout"]}, 2.5, 1.0, walls)], "screen")
     check("decide invalid", d["verdict"] == "discard" and d["reason"] == "invalid")
     check("gap ratio", gap_ratio(0.10, 0.05) == 0.5 and gap_ratio(None, 0.1) is None)
+    t = paired_randomization_test([1.0] * 10, "greater")
+    check("sign-flip: all-positive pairs give p = 2^-n", abs(t["p"] - 2 ** -10) < 1e-12 and t["exact"])
+    t = paired_randomization_test([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0], "greater")
+    check("sign-flip: symmetric pairs give p ~ 0.5", 0.4 < t["p"] < 0.7)
+    t = paired_randomization_test([0.0] * 6, "greater")
+    check("sign-flip: all-zero pairs give p = 1", t["p"] == 1.0)
+    t = paired_randomization_test([-2.0] * 8, "less")
+    check("sign-flip: regression alternative", abs(t["p"] - 2 ** -8) < 1e-12)
+    t = paired_randomization_test([3.0, 2.5, 2.8, 3.1, 2.9, 3.0, 2.7, 3.2, 2.6, 3.0, -0.1, 0.2, 2.9, 3.0, 2.8, 3.1, 2.9, 3.0, 2.7, 3.2, 2.6, 3.0], "greater")
+    check("sign-flip: Monte Carlo above the exact limit", t["exact"] is False and t["p"] < 0.01)
+    check("alpha per test is alpha over the budget", abs(alpha_per_test({"alpha": 0.05, "multiplicity": "bonferroni", "budget": {"experiments": 10}}) - 0.005) < 1e-12
+          and alpha_per_test({"alpha": 0.05, "multiplicity": "none", "budget": {"experiments": 10}}) == 0.05)
     tcard_ms = {"id": "t", "kind": "goal", "direction": "minimize", "unit": "ms", "measure": {"command": "x", "parse": "metric-line:t"}}
     tcard_ct = {"id": "c", "kind": "guardrail", "direction": "minimize", "unit": "count", "measure": {"command": "x", "parse": "metric-line:c"}}
     check("timing metric screens with 2 repeats and 1 warm-up", fidelity_spec(tcard_ms, "screen")["repeats"] == 2 and fidelity_spec(tcard_ms, "screen")["warmup"] == 1)
@@ -2826,7 +3013,7 @@ def selftest() -> int:
         home = Home(repo=repo, home=os.path.join(repo, ".strictlybetter"))
         home.ensure()
         card_g = {"id": "score", "kind": "goal", "direction": "minimize", "measure": {"command": "python3 bench.py", "parse": "metric-line:score", "timeout_s": 60},
-                  "fidelity": {"screen": {"repeats": 1}, "confirm": {"repeats": 3, "max_repeats": 5, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}},
+                  "fidelity": {"screen": {"repeats": 1}, "confirm": {"repeats": 10, "max_repeats": 10, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}},
                   "integrity": {"frozen_paths": ["bench.py", "tests/"]}, "gaming_risks": ["edit bench"], "contention_safe": True,
                   "degradation": {"apply": "python3 -c \"open('work.py','w').write('N = 60\\n')\""}}
         card_h = {"id": "tests_failed", "kind": "guardrail", "direction": "minimize", "measure": {"command": "python3 tests/t.py", "parse": "metric-line:tests_failed", "timeout_s": 60},
@@ -2834,7 +3021,7 @@ def selftest() -> int:
         card_q = {"id": "checks", "kind": "guardrail", "direction": "equal", "measure": {"command": "python3 bench.py", "parse": "metric-line:checks", "timeout_s": 60},
                   "gaming_risks": [], "contention_safe": True}
         card_s = {"id": "seed", "kind": "diagnostic", "direction": "maximize", "measure": {"command": "python3 bench.py", "parse": "metric-line:seed", "timeout_s": 60},
-                  "fidelity": {"confirm": {"repeats": 3, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}}, "gaming_risks": [], "contention_safe": True, "reuse_output": True}
+                  "fidelity": {"confirm": {"repeats": 10, "holdout": {"kind": "env", "var": "SB_SEED", "values": [7, 8, 9]}}}, "gaming_risks": [], "contention_safe": True, "reuse_output": True}
         for cd in (card_g, card_h, card_q, card_s):
             validate_card(cd)
             home.save_card(cd)
@@ -2878,13 +3065,14 @@ def selftest() -> int:
         card_ns = dict(card_g)
         card_ns["id"] = "score1"
         card_ns["fidelity"] = {"screen": {"repeats": 1}, "confirm": {"repeats": 1, "max_repeats": 1}}
+        # (also underpowered: 1 pair cannot reach alpha/2; the sigma halt fires first at baseline)
         home2.save_card(card_ns)
         sp2 = os.path.join(td, "c2.json")
         write_json_atomic(sp2, {"id": "t2", "goals": ["score1"], "budget": {"experiments": 2}})
         halted_ns = False
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                cmd_campaign(home2, argparse.Namespace(action="start", file=sp2, no_baseline=False, repeats=1, allow_unusable=True, allow_ratchet_regression=False))
+                cmd_campaign(home2, argparse.Namespace(action="start", file=sp2, no_baseline=False, repeats=1, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
         except SBError:
             halted_ns = (home2.campaign() or {}).get("status") == "halted"
         check("goal without measured sigma halts at start", halted_ns)
@@ -2900,7 +3088,7 @@ def selftest() -> int:
         frozen_goal = False
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                cmd_campaign(home3, argparse.Namespace(action="start", file=sp3, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False))
+                cmd_campaign(home3, argparse.Namespace(action="start", file=sp3, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
         except SBError:
             frozen_goal = str((home3.campaign() or {}).get("halt_reason", "")).startswith("goal-frozen")
         check("goal with only frozen targets halts at start", frozen_goal)
@@ -2959,8 +3147,10 @@ def selftest() -> int:
             cmd_confirm(home, argparse.Namespace(id=e1, force=False))
         r = home.experiments()[e1]
         check("confirm accepts real improvement", r["confirm"]["verdict"] == "accept")
+        tt = (r["confirm"].get("tests") or {}).get("score") or {}
+        check("confirm carries the exact test", tt.get("kind") == "paired-sign-flip" and tt.get("p") is not None and tt["p"] <= tt["alpha"] and tt.get("n_pairs") == 10)
         check("confirm is paired against fresh head", r["confirm"].get("paired") is True and (r["confirm"].get("head_results") or {}).get("score", {}).get("median") in (40.0, 41.0))
-        check("confirm used the holdout seeds", sorted((r["confirm"].get("results") or {}).get("seed", {}).get("values") or []) == [7.0, 8.0, 9.0])
+        check("confirm used the holdout seeds", sorted(set((r["confirm"].get("results") or {}).get("seed", {}).get("values") or [])) == [7.0, 8.0, 9.0])
         check("paired baseline is fresh head median", any(comp["id"] == "score" and comp["baseline"] in (40.0, 41.0) for comp in r["confirm"]["comparisons"]))
         # re-submitting a different (tampered) commit after confirmation must not be acceptable
         wt1 = os.path.join(home.wt_dir, e1)
@@ -2981,7 +3171,7 @@ def selftest() -> int:
             f.write("N = 20\n")
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_submit(home, argparse.Namespace(id=e1))
-            cmd_campaign(home, argparse.Namespace(action="resume", file=None, reason=None, no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False))
+            cmd_campaign(home, argparse.Namespace(action="resume", file=None, reason=None, no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False, allow_underpowered=False))
             cmd_measure(home, argparse.Namespace(id=e1, fidelity="screen", repeats=None, keep_runs=False, audit=False))
             cmd_judge(home, argparse.Namespace(id=e1, fidelity="screen"))
             write_json_atomic(vp, {"verdict": "clean", "pattern": "", "evidence": "", "recommended_check": ""})
@@ -3019,7 +3209,7 @@ def selftest() -> int:
         cj["measure"]["command"] = "python3 bench.py"
         write_json_atomic(cpath, cj)
         with contextlib.redirect_stdout(io.StringIO()):
-            cmd_campaign(home, argparse.Namespace(action="resume", file=None, reason=None, no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False))
+            cmd_campaign(home, argparse.Namespace(action="resume", file=None, reason=None, no_baseline=True, repeats=None, allow_unusable=False, allow_ratchet_regression=False, allow_underpowered=False))
         # experiment 2: gaming attempt (edit frozen bench.py) -> integrity violation
         write_json_atomic(hp, {"operator": "config", "target": "bench.py", "hypothesis": "cheat", "predicted": {"score": "-100%"}})
         out = io.StringIO()
@@ -3136,7 +3326,7 @@ def selftest() -> int:
         tlog = os.path.join(td, "teardown.log")
         card = {"id": "score", "kind": "goal", "direction": "minimize",
                 "measure": {"command": f"SB_CHECKOUT_DIR=$PWD python3 {harness}/bench.py", "parse": "metric-line:score", "timeout_s": 60},
-                "fidelity": {"screen": {"repeats": 1}, "confirm": {"repeats": 2, "max_repeats": 2}},
+                "fidelity": {"screen": {"repeats": 1}, "confirm": {"repeats": 8, "max_repeats": 8}},
                 "integrity": {"external_paths": [harness]}, "gaming_risks": ["edit harness"], "contention_safe": True,
                 "services": {"setup": "touch .svc-up", "ready": "test -f .svc-up", "ready_timeout_s": 5, "teardown": f"rm -f .svc-up; echo down >> {tlog}"}}
         validate_card(card)
@@ -3146,9 +3336,24 @@ def selftest() -> int:
         sp = os.path.join(td, "c.json")
         write_json_atomic(sp, spec)
         with contextlib.redirect_stdout(io.StringIO()):
-            cmd_campaign(home, argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False))
+            cmd_campaign(home, argparse.Namespace(action="start", file=sp, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
         c = home.campaign()
         check("external instrument hashed at start", harness in (c.get("external_hashes") or {}))
+        check("alpha bookkeeping at start", abs(c.get("alpha_test", 0) - 0.05 / 4) < 1e-12)
+        home4 = Home(repo=repo, home=os.path.join(td, "home4"))
+        home4.ensure()
+        card_up = dict(card); card_up["id"] = "score_up"; card_up["fidelity"] = {"screen": {"repeats": 1}, "confirm": {"repeats": 3}}
+        card_up["services"] = {"setup": "touch .svc-up", "ready": "test -f .svc-up", "ready_timeout_s": 5, "teardown": "rm -f .svc-up"}
+        home4.save_card(card_up)
+        sp4 = os.path.join(td, "c4.json")
+        write_json_atomic(sp4, {"id": "mr4", "goals": ["score_up"], "budget": {"experiments": 30}, "walls": {"holdout": False}})
+        under = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_campaign(home4, argparse.Namespace(action="start", file=sp4, no_baseline=False, repeats=3, allow_unusable=True, allow_ratchet_regression=False, allow_underpowered=False))
+        except SBError:
+            under = str((home4.campaign() or {}).get("halt_reason", "")).startswith("underpowered")
+        check("underpowered goal halts at start", under)
         check("services teardown ran after baseline", os.path.exists(tlog) and open(tlog).read().count("down") >= 1)
         check("baseline measured through the service", (home.baseline().get("score") or {}).get("best") == 40.0)
         check("guard denies external instrument", not guard_decision(home, os.path.join(harness, "bench.py"))[0])
@@ -3226,7 +3431,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("profile"); sp.add_argument("action", choices=["write", "show"]); sp.add_argument("--file", default="-")
     sp = sub.add_parser("card"); sp.add_argument("action", choices=["add", "list", "validate", "show", "probe"]); sp.add_argument("id", nargs="?"); sp.add_argument("--file", default="-"); sp.add_argument("--repeats", type=int, default=2)
     sp = sub.add_parser("baseline"); sp.add_argument("--metric"); sp.add_argument("-k", "--repeats", type=int); sp.add_argument("--levels")
-    sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int); sp.add_argument("--allow-unusable", action="store_true", help="start even if a goal's minimum detectable effect exceeds the usable limit"); sp.add_argument("--allow-ratchet-regression", action="store_true", help="start even if HEAD is worse than a past campaign's ratcheted best")
+    sp = sub.add_parser("campaign"); sp.add_argument("action", choices=["start", "show", "end", "halt", "resume"]); sp.add_argument("--file", default="-"); sp.add_argument("--reason"); sp.add_argument("--no-baseline", action="store_true"); sp.add_argument("--repeats", type=int); sp.add_argument("--allow-unusable", action="store_true", help="start even if a goal's minimum detectable effect exceeds the usable limit"); sp.add_argument("--allow-ratchet-regression", action="store_true", help="start even if HEAD is worse than a past campaign's ratcheted best"); sp.add_argument("--allow-underpowered", action="store_true", help="start even if a goal's confirm pairs cannot reach the per-test alpha (no acceptance will be possible)")
     sp = sub.add_parser("next"); sp.add_argument("--json", action="store_true"); sp.add_argument("--seed", type=int)
     sp = sub.add_parser("prereg"); sp.add_argument("--file", default="-")
     sp = sub.add_parser("submit"); sp.add_argument("id")
